@@ -281,6 +281,7 @@ async function openChat(id) {
     }
     renderMessages();
     loadChatList();
+    setUrlChat(data.id); // mémorise la discussion dans l'URL (#id)
   } catch (e) {
     setStatus("Impossible d'ouvrir la discussion");
   }
@@ -296,7 +297,16 @@ function newChat() {
   renderAttachments();
   renderMessages();
   loadChatList();
+  setUrlChat(null); // enlève l'id de l'URL
   el.input.focus();
+}
+
+// Met à jour le hash de l'URL avec l'id de discussion (sans recharger la page).
+function setUrlChat(id) {
+  const target = id ? "#" + id : "#";
+  if (location.hash !== target) {
+    history.replaceState(null, "", id ? "#" + id : location.pathname);
+  }
 }
 
 async function deleteChat(id) {
@@ -312,6 +322,7 @@ async function persist() {
   if (!state.chatId) {
     state.chatId = genId();
     state.createdAt = Date.now();
+    setUrlChat(state.chatId); // nouvelle discussion : on la met dans l'URL
   }
   // Titre = début du premier message utilisateur.
   if (!state.title) {
@@ -1093,5 +1104,17 @@ function showNoKeyBanner() {
   await loadPrefs();
   await loadModels();
   await loadChatList();
+
+  // Rouvre la discussion indiquée dans l'URL (#id) après un refresh.
+  const idFromUrl = location.hash.slice(1);
+  if (idFromUrl) await openChat(idFromUrl);
+
   el.input.focus();
 })();
+
+// Navigation arrière/avant du navigateur : suit le hash.
+window.addEventListener("hashchange", () => {
+  const id = location.hash.slice(1);
+  if (id && id !== state.chatId) openChat(id);
+  else if (!id && state.chatId) newChat();
+});
