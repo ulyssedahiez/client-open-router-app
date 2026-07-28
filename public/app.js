@@ -13,11 +13,12 @@ const state = {
   pending: [],         // pièces jointes en attente : {type,name,mime,dataUrl,text?}
   onlyImageModels: false, // filtre : n'afficher que les modèles qui génèrent des images
   expanded: {},        // groupes explicitement ouverts : { "prov:OpenAI": true }
-  systemPrompt: "",    // instructions système de la discussion courante
-  settings: {          // réglages d'inférence (persistés globalement)
-    temperature: Number(localStorage.getItem("set-temperature") ?? 1),
-    maxTokens: Number(localStorage.getItem("set-maxtokens") ?? 0), // 0 = illimité
-  },
+  // Réglages par défaut (côté serveur, prefs.json) : appliqués aux NOUVELLES
+  // discussions. Modifiables et surchargeables au cas par cas.
+  defaults: { temperature: 1, maxTokens: 0, systemPrompt: "" },
+  // Réglages de la discussion COURANTE (seed depuis defaults, persistés avec le chat).
+  systemPrompt: "",
+  settings: { temperature: 1, maxTokens: 0 },
 };
 
 // ---------- Raccourcis DOM ----------
@@ -49,11 +50,19 @@ const el = {
   lightboxClose: $("#lightbox-close"),
   lightboxDl: $("#lightbox-dl"),
   settingsBtn: $("#settings-btn"),
-  settingsPanel: $("#settings-panel"),
+  settingsBtnBottom: $("#settings-btn-bottom"),
+  settingsModal: $("#settings-modal"),
+  settingsClose: $("#settings-close"),
   systemPrompt: $("#system-prompt"),
   tempRange: $("#temp-range"),
   tempVal: $("#temp-val"),
   maxTok: $("#maxtok"),
+  setDefaultBtn: $("#set-default-btn"),
+  setDefaultOk: $("#set-default-ok"),
+  usageBtn: $("#usage-btn"),
+  usageModal: $("#usage-modal"),
+  usageClose: $("#usage-close"),
+  usageBody: $("#usage-body"),
 };
 
 // ---------- Lightbox ----------
@@ -406,6 +415,11 @@ async function openChat(id) {
     state.messages = data.messages || [];
     state.createdAt = data.createdAt || Date.now();
     state.systemPrompt = data.systemPrompt || "";
+    // Réglages de la discussion (sinon on retombe sur les défauts).
+    state.settings = {
+      temperature: Number(data.settings?.temperature ?? state.defaults.temperature),
+      maxTokens: Number(data.settings?.maxTokens ?? state.defaults.maxTokens),
+    };
     state.pending = [];
     renderAttachments();
     el.settingsBtn.classList.toggle("has-system", Boolean(state.systemPrompt.trim()));
@@ -429,9 +443,9 @@ function newChat() {
   state.title = null;
   state.messages = [];
   state.createdAt = null;
-  state.systemPrompt = "";
   state.pending = [];
-  el.settingsBtn.classList.remove("has-system");
+  applyDefaultsToCurrent(); // nouvelle discussion = réglages par défaut
+  el.settingsBtn.classList.toggle("has-system", Boolean(state.systemPrompt.trim()));
   renderAttachments();
   renderMessages();
   renderCostBar();
@@ -479,6 +493,7 @@ async function persist() {
         model: state.model,
         messages: state.messages,
         systemPrompt: state.systemPrompt || "",
+        settings: state.settings,
         createdAt: state.createdAt,
       }),
     });
@@ -705,9 +720,40 @@ async function loadPrefs() {
     const p = await r.json();
     state.favorites = Array.isArray(p.favorites) ? p.favorites : [];
     state.recents = Array.isArray(p.recents) ? p.recents : [];
+    if (p.defaults) {
+      state.defaults = {
+        temperature: Number(p.defaults.temperature ?? 1),
+        maxTokens: Number(p.defaults.maxTokens ?? 0),
+        systemPrompt: p.defaults.systemPrompt || "",
+      };
+    }
   } catch {
     state.favorites = [];
     state.recents = [];
+  }
+  // La discussion démarre avec les réglages par défaut.
+  applyDefaultsToCurrent();
+}
+
+// Copie les réglages par défaut dans la discussion courante (nouvelle discussion).
+function applyDefaultsToCurrent() {
+  state.settings = {
+    temperature: state.defaults.temperature,
+    maxTokens: state.defaults.maxTokens,
+  };
+  state.systemPrompt = state.defaults.systemPrompt || "";
+}
+
+// Sauvegarde les réglages par défaut côté serveur.
+async function saveDefaults() {
+  try {
+    await fetch("/api/prefs", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ defaults: state.defaults }),
+    });
+  } catch {
+    setStatus("⚠️ défauts non sauvés");
   }
 }
 
@@ -1172,50 +1218,115 @@ el.lightbox.addEventListener("click", (e) => {
   if (e.target === el.lightbox) closeLightbox();
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !el.lightbox.hidden) closeLightbox();
+  if (e.key !== "Escape") return;
+  if (!el.lightbox.hidden) closeLightbox();
+  else if (!el.settingsModal.hidden) closeSettings();
+  else if (!el.usageModal.hidden) el.usageModal.hidden = true;
 });
 
-// ---------- Panneau instructions & réglages ----------
+// ---------- Modale instructions & réglages ----------
 function syncSettingsUI() {
   el.systemPrompt.value = state.systemPrompt || "";
   el.tempRange.value = state.settings.temperature;
   el.tempVal.textContent = Number(state.settings.temperature).toFixed(1);
   el.maxTok.value = state.settings.maxTokens || 0;
 }
-el.settingsBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  if (el.settingsPanel.hidden) {
-    syncSettingsUI();
-    el.settingsPanel.hidden = false;
-  } else {
-    el.settingsPanel.hidden = true;
-  }
+function openSettings() {
+  syncSettingsUI();
+  el.setDefaultOk.hidden = true;
+  el.settingsModal.hidden = false;
+}
+function closeSettings() {
+  el.settingsModal.hidden = true;
+}
+el.settingsBtn.addEventListener("click", openSettings);
+el.settingsBtnBottom.addEventListener("click", openSettings);
+el.settingsClose.addEventListener("click", closeSettings);
+el.settingsModal.addEventListener("click", (e) => {
+  if (e.target === el.settingsModal) closeSettings();
 });
-document.addEventListener("click", (e) => {
-  if (
-    !el.settingsPanel.hidden &&
-    !el.settingsPanel.contains(e.target) &&
-    e.target !== el.settingsBtn
-  ) {
-    el.settingsPanel.hidden = true;
-  }
-});
-// Le prompt système est propre à la discussion → persisté avec elle.
+
+// Réglages de la DISCUSSION courante (persistés avec elle).
 el.systemPrompt.addEventListener("input", () => {
   state.systemPrompt = el.systemPrompt.value;
   el.settingsBtn.classList.toggle("has-system", Boolean(state.systemPrompt.trim()));
   if (state.chatId) persist();
 });
-// Température et max tokens sont globaux → localStorage.
 el.tempRange.addEventListener("input", () => {
   state.settings.temperature = Number(el.tempRange.value);
   el.tempVal.textContent = state.settings.temperature.toFixed(1);
-  localStorage.setItem("set-temperature", state.settings.temperature);
+  if (state.chatId) persist();
 });
 el.maxTok.addEventListener("input", () => {
   state.settings.maxTokens = Math.max(0, Number(el.maxTok.value) || 0);
-  localStorage.setItem("set-maxtokens", state.settings.maxTokens);
+  if (state.chatId) persist();
 });
+
+// « Définir comme défaut » : copie les réglages courants dans les défauts.
+el.setDefaultBtn.addEventListener("click", async () => {
+  state.defaults = {
+    temperature: state.settings.temperature,
+    maxTokens: state.settings.maxTokens,
+    systemPrompt: state.systemPrompt || "",
+  };
+  await saveDefaults();
+  el.setDefaultOk.hidden = false;
+  setTimeout(() => (el.setDefaultOk.hidden = true), 2000);
+});
+
+// ---------- Modale bilan de consommation ----------
+el.usageBtn.addEventListener("click", openUsage);
+el.usageClose.addEventListener("click", () => (el.usageModal.hidden = true));
+el.usageModal.addEventListener("click", (e) => {
+  if (e.target === el.usageModal) el.usageModal.hidden = true;
+});
+
+async function openUsage() {
+  el.usageModal.hidden = false;
+  el.usageBody.innerHTML = '<div class="muted">Chargement…</div>';
+  try {
+    const r = await fetch("/api/usage");
+    const u = await r.json();
+    renderUsage(u);
+  } catch {
+    el.usageBody.innerHTML = '<div class="muted">Impossible de charger le bilan.</div>';
+  }
+}
+
+function renderUsage(u) {
+  const money = (c) => "$" + c.toFixed(c < 0.01 ? 5 : 4);
+  const tokFmt = (n) => n.toLocaleString("fr-FR");
+  let html = `
+    <div class="usage-total">
+      <div class="usage-card">
+        <div class="big">${tokFmt(u.totalTokens)}</div>
+        <div class="lbl">tokens au total</div>
+      </div>
+      <div class="usage-card">
+        <div class="big">${u.hasCost ? money(u.totalCost) : "—"}</div>
+        <div class="lbl">coût cumulé</div>
+      </div>
+    </div>
+    <div class="sp-hint">${u.responses} réponses · ${u.chats} discussion(s). Seules les réponses générées depuis l'ajout du suivi ont un coût.</div>
+  `;
+  if (u.perModel && u.perModel.length) {
+    html += `<table><thead><tr>
+        <th>Modèle</th><th class="num">Réponses</th><th class="num">Tokens</th><th class="num">Coût</th>
+      </tr></thead><tbody>`;
+    for (const m of u.perModel) {
+      html += `<tr>
+        <td>${escapeHtml(m.model)}</td>
+        <td class="num">${m.responses}</td>
+        <td class="num">${tokFmt(m.tokens)}</td>
+        <td class="num">${m.cost > 0 ? money(m.cost) : "—"}</td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+  } else {
+    html += `<div class="muted" style="margin-top:10px">Aucune consommation enregistrée pour l'instant.</div>`;
+  }
+  el.usageBody.innerHTML = html;
+}
 
 // Pièces jointes : bouton, drag & drop, coller.
 el.attachBtn.addEventListener("click", () => el.fileInput.click());

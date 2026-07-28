@@ -152,6 +152,8 @@ async function saveChat(req, res, id) {
     messages: body.messages,
     systemPrompt:
       typeof body.systemPrompt === "string" ? body.systemPrompt.slice(0, 8000) : "",
+    settings:
+      body.settings && typeof body.settings === "object" ? body.settings : undefined,
     createdAt: body.createdAt || Date.now(),
     updatedAt: Date.now(),
   };
@@ -176,16 +178,34 @@ function getConfig(res) {
 // --- Préférences (favoris + modèles récents), stockées dans data/prefs.json ---
 const MAX_RECENTS = 8;
 
+// Réglages par défaut d'une nouvelle discussion.
+const DEFAULT_SETTINGS = { temperature: 1, maxTokens: 0, systemPrompt: "" };
+
+function sanitizeDefaults(d) {
+  const out = { ...DEFAULT_SETTINGS };
+  if (d && typeof d === "object") {
+    if (typeof d.temperature === "number" && d.temperature >= 0 && d.temperature <= 2)
+      out.temperature = d.temperature;
+    if (typeof d.maxTokens === "number" && d.maxTokens >= 0)
+      out.maxTokens = Math.floor(d.maxTokens);
+    if (typeof d.systemPrompt === "string")
+      out.systemPrompt = d.systemPrompt.slice(0, 8000);
+  }
+  return out;
+}
+
 async function readPrefs() {
-  if (!existsSync(PREFS_PATH)) return { favorites: [], recents: [] };
+  const empty = { favorites: [], recents: [], defaults: { ...DEFAULT_SETTINGS } };
+  if (!existsSync(PREFS_PATH)) return empty;
   try {
     const data = JSON.parse(await readFile(PREFS_PATH, "utf8"));
     return {
       favorites: Array.isArray(data.favorites) ? data.favorites : [],
       recents: Array.isArray(data.recents) ? data.recents : [],
+      defaults: sanitizeDefaults(data.defaults),
     };
   } catch {
-    return { favorites: [], recents: [] };
+    return empty;
   }
 }
 
@@ -199,7 +219,7 @@ async function getPrefs(res) {
   sendJSON(res, 200, await readPrefs());
 }
 
-// PUT /api/prefs -> remplace les favoris (liste de model ids)
+// PUT /api/prefs -> met à jour favoris et/ou réglages par défaut
 async function savePrefs(req, res) {
   const body = await readBody(req);
   const prefs = await readPrefs();
@@ -207,6 +227,9 @@ async function savePrefs(req, res) {
     prefs.favorites = body.favorites
       .filter((x) => typeof x === "string")
       .slice(0, 100);
+  }
+  if (body.defaults && typeof body.defaults === "object") {
+    prefs.defaults = sanitizeDefaults(body.defaults);
   }
   await writePrefs(prefs);
   sendJSON(res, 200, prefs);
@@ -224,6 +247,58 @@ async function pushRecent(req, res) {
   );
   await writePrefs(prefs);
   sendJSON(res, 200, prefs);
+}
+
+// GET /api/usage -> bilan de consommation (somme sur toutes les discussions)
+async function getUsage(res) {
+  await ensureChatsDir();
+  const files = (await readdir(CHATS_DIR)).filter((f) => f.endsWith(".json"));
+  let totalTokens = 0;
+  let totalCost = 0;
+  let hasCost = false;
+  let responses = 0;
+  let chats = 0;
+  const byModel = {}; // modelId -> { tokens, cost, responses }
+
+  for (const f of files) {
+    let data;
+    try {
+      data = JSON.parse(await readFile(join(CHATS_DIR, f), "utf8"));
+    } catch {
+      continue;
+    }
+    chats++;
+    const chatModel = data.model || "inconnu";
+    for (const m of data.messages || []) {
+      if (m.role !== "assistant" || !m.usage) continue;
+      const u = m.usage;
+      const tk = u.total || (u.in || 0) + (u.out || 0);
+      const cost = typeof u.cost === "number" ? u.cost : 0;
+      // Le modèle est stocké par discussion ; on répartit au niveau du chat.
+      const mk = chatModel;
+      if (!byModel[mk]) byModel[mk] = { tokens: 0, cost: 0, responses: 0 };
+      byModel[mk].tokens += tk;
+      byModel[mk].cost += cost;
+      byModel[mk].responses++;
+      totalTokens += tk;
+      totalCost += cost;
+      if (typeof u.cost === "number") hasCost = true;
+      responses++;
+    }
+  }
+
+  const perModel = Object.entries(byModel)
+    .map(([model, v]) => ({ model, ...v }))
+    .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);
+
+  sendJSON(res, 200, {
+    totalTokens,
+    totalCost,
+    hasCost,
+    responses,
+    chats,
+    perModel,
+  });
 }
 
 // GET /api/models -> liste des modèles OpenRouter (pour le menu déroulant)
@@ -420,6 +495,7 @@ const server = createServer(async (req, res) => {
     if (path === "/api/prefs" && method === "PUT") return await savePrefs(req, res);
     if (path === "/api/prefs/recent" && method === "POST")
       return await pushRecent(req, res);
+    if (path === "/api/usage" && method === "GET") return await getUsage(res);
     if (path === "/api/models" && method === "GET") return await getModels(res);
     if (path === "/api/chat" && method === "POST") return await chat(req, res);
     if (path === "/api/chats" && method === "GET") return await listChats(res);

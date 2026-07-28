@@ -49,23 +49,8 @@
         </div>
 
         <span id="status" class="muted"></span>
+        <button id="usage-btn" class="icon-btn" title="Bilan de consommation">📊</button>
         <button id="settings-btn" class="icon-btn" title="Instructions & réglages">⚙</button>
-
-        <!-- Panneau instructions système + réglages -->
-        <div id="settings-panel" hidden>
-          <label class="sp-label" for="system-prompt">Instructions système (cette discussion)</label>
-          <textarea id="system-prompt" rows="4"
-            placeholder="Ex. : Réponds en français, de façon concise. Tu es un expert en…"></textarea>
-
-          <label class="sp-label" for="temp-range">
-            Température : <span id="temp-val">1.0</span>
-          </label>
-          <input id="temp-range" type="range" min="0" max="2" step="0.1" value="1" />
-          <div class="sp-hint">0 = précis/déterministe · 2 = très créatif</div>
-
-          <label class="sp-label" for="maxtok">Longueur max (tokens, 0 = illimité)</label>
-          <input id="maxtok" type="number" min="0" step="128" value="0" />
-        </div>
       </header>
 
       <section id="messages"></section>
@@ -75,6 +60,7 @@
         <div id="attachments" hidden></div>
         <div class="composer-row">
           <button id="attach-btn" class="icon-btn" title="Joindre une image ou un document">📎</button>
+          <button id="settings-btn-bottom" class="icon-btn" title="Instructions & réglages">⚙</button>
           <input id="file-input" type="file" multiple hidden
                  accept="image/*,.pdf,.txt,.md,.markdown,.csv,.json,.js,.ts,.py,.html,.css,.xml,.yaml,.yml,.log" />
           <textarea
@@ -97,6 +83,49 @@
       <button id="lightbox-close" title="Fermer (Échap)">✕</button>
     </div>
     <img id="lightbox-img" alt="image agrandie" />
+  </div>
+
+  <!-- Modale : instructions système + réglages -->
+  <div id="settings-modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Instructions &amp; réglages</h3>
+        <button id="settings-close" class="modal-x" title="Fermer">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="sp-label" for="system-prompt">Instructions système (cette discussion)</label>
+        <textarea id="system-prompt" rows="4"
+          placeholder="Ex. : Réponds en français, de façon concise. Tu es un expert en…"></textarea>
+
+        <label class="sp-label" for="temp-range">
+          Température : <span id="temp-val">1.0</span>
+        </label>
+        <input id="temp-range" type="range" min="0" max="2" step="0.1" value="1" />
+        <div class="sp-hint">0 = précis/déterministe · 2 = très créatif</div>
+
+        <label class="sp-label" for="maxtok">Longueur max (tokens, 0 = illimité)</label>
+        <input id="maxtok" type="number" min="0" step="128" value="0" />
+
+        <div class="sp-defaults">
+          <button id="set-default-btn" class="btn-outline">Définir comme réglages par défaut</button>
+          <div class="sp-hint">Appliqués à chaque nouvelle discussion (surchargeables ici).</div>
+          <span id="set-default-ok" class="sp-ok" hidden>✓ Enregistré comme défaut</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modale : bilan de consommation -->
+  <div id="usage-modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Bilan de consommation</h3>
+        <button id="usage-close" class="modal-x" title="Fermer">✕</button>
+      </div>
+      <div class="modal-body" id="usage-body">
+        <div class="muted">Chargement…</div>
+      </div>
+    </div>
   </div>
 
   <!-- Libs vendorisées en local (aucun CDN à l'exécution) -->
