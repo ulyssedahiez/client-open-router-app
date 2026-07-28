@@ -149,12 +149,14 @@
           </span>
           <input id="web-search" type="checkbox" class="switch" />
         </label>
+        <div id="warn-web" class="sp-warn" hidden></div>
 
         <label class="sp-label" for="temp-range">
           Température : <span id="temp-val">1.0</span>
         </label>
         <input id="temp-range" type="range" min="0" max="2" step="0.1" value="1" />
         <div class="sp-hint">0 = précis/déterministe · 2 = très créatif</div>
+        <div id="warn-temp" class="sp-warn" hidden></div>
 
         <label class="sp-label" for="maxtok">Longueur max (tokens, 0 = illimité)</label>
         <input id="maxtok" type="number" min="0" step="128" value="0" />
@@ -171,21 +173,25 @@
             </label>
             <input id="adv-topp" type="range" min="0" max="1" step="0.05" value="1" />
             <div class="sp-hint">Alternative à la température (0.1–1). « auto » = non envoyé.</div>
+            <div id="warn-topp" class="sp-warn" hidden></div>
 
             <label class="sp-label" for="adv-freq">
               Frequency penalty : <span id="adv-freq-val">0</span>
             </label>
             <input id="adv-freq" type="range" min="-2" max="2" step="0.1" value="0" />
             <div class="sp-hint">Positif = moins de répétitions de mots.</div>
+            <div id="warn-freq" class="sp-warn" hidden></div>
 
             <label class="sp-label" for="adv-pres">
               Presence penalty : <span id="adv-pres-val">0</span>
             </label>
             <input id="adv-pres" type="range" min="-2" max="2" step="0.1" value="0" />
             <div class="sp-hint">Positif = pousse à aborder de nouveaux sujets.</div>
+            <div id="warn-pres" class="sp-warn" hidden></div>
 
             <label class="sp-label" for="adv-seed">Seed (reproductibilité, vide = aléatoire)</label>
             <input id="adv-seed" type="number" step="1" placeholder="ex. 42" />
+            <div id="warn-seed" class="sp-warn" hidden></div>
 
             <label class="sp-label" for="adv-reasoning">Effort de raisonnement</label>
             <select id="adv-reasoning">
@@ -195,9 +201,11 @@
               <option value="high">Élevé (plus poussé)</option>
             </select>
             <div class="sp-hint">Pour les modèles à raisonnement (GPT-5, o-series, Claude thinking).</div>
+            <div id="warn-reasoning" class="sp-warn" hidden></div>
 
             <label class="sp-label" for="adv-stop">Séquences d'arrêt (séparées par des virgules)</label>
             <input id="adv-stop" type="text" placeholder="ex. FIN, ###" />
+            <div id="warn-stop" class="sp-warn" hidden></div>
           </div>
         </div>
       </div>

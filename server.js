@@ -332,6 +332,10 @@ async function getModels(res) {
           canImageIn: input.includes("image"),
           canFileIn: input.includes("file"),
           canImageOut: output.includes("image"),
+          // Paramètres réellement supportés par le modèle (avertissements front).
+          supported: Array.isArray(m.supported_parameters)
+            ? m.supported_parameters
+            : null,
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));

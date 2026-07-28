@@ -90,6 +90,14 @@ const el = {
   advSeed: $("#adv-seed"),
   advReasoning: $("#adv-reasoning"),
   advStop: $("#adv-stop"),
+  warnWeb: $("#warn-web"),
+  warnTemp: $("#warn-temp"),
+  warnTopp: $("#warn-topp"),
+  warnFreq: $("#warn-freq"),
+  warnPres: $("#warn-pres"),
+  warnSeed: $("#warn-seed"),
+  warnReasoning: $("#warn-reasoning"),
+  warnStop: $("#warn-stop"),
   usageBtn: $("#usage-btn"),
   usageModal: $("#usage-modal"),
   usageClose: $("#usage-close"),
@@ -847,6 +855,7 @@ function selectModel(id) {
   updateModelButton();
   updateFavToggle();
   renderTree();
+  refreshWarnings(); // avertissements mis à jour selon le nouveau modèle
   closeModelPanel();
 }
 
@@ -1417,6 +1426,42 @@ document.addEventListener("keydown", (e) => {
   else if (!el.usageModal.hidden) closeUsage();
 });
 
+// ---------- Avertissements : réglage non supporté par le modèle ----------
+// Un modèle expose `supported` (liste des paramètres OpenRouter qu'il accepte).
+// Si un réglage n'y est pas, il sera ignoré → on prévient l'utilisateur.
+function paramSupported(param) {
+  const cm = currentModel();
+  // Pas d'info (ancienne API) → on n'affiche pas d'avertissement.
+  if (!cm || !Array.isArray(cm.supported)) return true;
+  return cm.supported.includes(param);
+}
+
+// Place (ou retire) un avertissement à côté d'un champ.
+function setWarn(warnEl, param, label) {
+  if (!warnEl) return;
+  if (paramSupported(param)) {
+    warnEl.hidden = true;
+    warnEl.textContent = "";
+  } else {
+    warnEl.hidden = false;
+    warnEl.textContent = `⚠ Ce modèle ignore ${label}.`;
+  }
+}
+
+// Rafraîchit tous les avertissements selon le modèle courant.
+function refreshWarnings() {
+  setWarn(el.warnTemp, "temperature", "la température");
+  setWarn(el.warnWeb, "web_search_options", "la recherche internet");
+  setWarn(el.warnTopp, "top_p", "le Top P");
+  setWarn(el.warnFreq, "frequency_penalty", "le frequency penalty");
+  setWarn(el.warnPres, "presence_penalty", "le presence penalty");
+  setWarn(el.warnSeed, "seed", "le seed");
+  setWarn(el.warnReasoning, "reasoning", "l'effort de raisonnement");
+  setWarn(el.warnStop, "stop", "les séquences d'arrêt");
+  // (Les réglages « par défaut » ne dépendent pas du modèle courant :
+  // ils s'appliqueront à de futures discussions → pas d'avertissement là.)
+}
+
 // ---------- Modales réglages (générale + rapide) ----------
 // Synchronise les champs des deux modales avec l'état courant.
 function syncSettingsUI() {
@@ -1442,6 +1487,8 @@ function syncSettingsUI() {
   el.defTempRange.value = state.defaults.temperature;
   el.defTempVal.textContent = Number(state.defaults.temperature).toFixed(1);
   el.defMaxTok.value = state.defaults.maxTokens || 0;
+  // Avertissements selon les capacités du modèle courant.
+  refreshWarnings();
 }
 
 // ⚙ HAUT : instructions système + réglages par défaut.
