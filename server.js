@@ -279,9 +279,32 @@ async function chat(req, res) {
   // Si le navigateur ferme l'onglet, on coupe la requête vers OpenRouter.
   req.on("close", () => controller.abort());
 
+  // Consigne de formatage : pousse les modèles à produire de VRAIS tableaux
+  // markdown (avec la ligne de séparation |---|), sinon le front ne peut pas
+  // les rendre en tableau. On ne l'ajoute que s'il n'y a pas déjà un system,
+  // et pas pour la génération d'images.
+  const wantsImage = Array.isArray(modalities) && modalities.includes("image");
+  const hasSystem = messages.some((m) => m.role === "system");
+  const outMessages =
+    wantsImage || hasSystem
+      ? messages
+      : [
+          {
+            role: "system",
+            content:
+              "Formate tes réponses en Markdown. Pour tout tableau, utilise " +
+              "impérativement la syntaxe Markdown complète avec la ligne de " +
+              "séparation, par exemple :\n\n" +
+              "| Colonne A | Colonne B |\n|---|---|\n| valeur | valeur |\n\n" +
+              "N'utilise jamais de simples barres verticales sans cette ligne " +
+              "de séparation, sinon le tableau ne s'affichera pas correctement.",
+          },
+          ...messages,
+        ];
+
   // Payload OpenRouter. `messages` peut contenir du contenu multimodal
   // (tableau de parts texte/image) : on le relaie tel quel.
-  const payload = { model, messages, stream: true };
+  const payload = { model, messages: outMessages, stream: true };
   // Si le front demande une sortie image (génération), on l'active.
   if (Array.isArray(modalities) && modalities.length) {
     payload.modalities = modalities;
