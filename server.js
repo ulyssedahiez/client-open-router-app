@@ -150,6 +150,8 @@ async function saveChat(req, res, id) {
     title: typeof body.title === "string" ? body.title.slice(0, 200) : "Sans titre",
     model: typeof body.model === "string" ? body.model : null,
     messages: body.messages,
+    systemPrompt:
+      typeof body.systemPrompt === "string" ? body.systemPrompt.slice(0, 8000) : "",
     createdAt: body.createdAt || Date.now(),
     updatedAt: Date.now(),
   };
@@ -270,7 +272,7 @@ async function chat(req, res) {
     return sendJSON(res, 400, { error: String(e.message || e) });
   }
 
-  const { model, messages, modalities } = body;
+  const { model, messages, modalities, system, temperature, max_tokens } = body;
   if (!model || !Array.isArray(messages) || messages.length === 0) {
     return sendJSON(res, 400, { error: "model et messages requis" });
   }
@@ -279,36 +281,38 @@ async function chat(req, res) {
   // Si le navigateur ferme l'onglet, on coupe la requête vers OpenRouter.
   req.on("close", () => controller.abort());
 
-  // Consigne de formatage : pousse les modèles à produire de VRAIS tableaux
-  // markdown (avec la ligne de séparation |---|), sinon le front ne peut pas
-  // les rendre en tableau. On ne l'ajoute que s'il n'y a pas déjà un system,
-  // et pas pour la génération d'images.
   const wantsImage = Array.isArray(modalities) && modalities.includes("image");
-  const hasSystem = messages.some((m) => m.role === "system");
-  const outMessages =
-    wantsImage || hasSystem
-      ? messages
-      : [
-          {
-            role: "system",
-            content:
-              "Formate tes réponses en Markdown. Pour tout tableau, utilise " +
-              "impérativement la syntaxe Markdown complète avec la ligne de " +
-              "séparation, par exemple :\n\n" +
-              "| Colonne A | Colonne B |\n|---|---|\n| valeur | valeur |\n\n" +
-              "N'utilise jamais de simples barres verticales sans cette ligne " +
-              "de séparation, sinon le tableau ne s'affichera pas correctement.",
-          },
-          ...messages,
-        ];
 
-  // Payload OpenRouter. `messages` peut contenir du contenu multimodal
-  // (tableau de parts texte/image) : on le relaie tel quel.
+  // Message système = consigne de formatage markdown + prompt système utilisateur.
+  const MARKDOWN_HINT =
+    "Formate tes réponses en Markdown. Pour tout tableau, utilise " +
+    "impérativement la syntaxe Markdown complète avec la ligne de séparation, " +
+    "par exemple :\n\n| Colonne A | Colonne B |\n|---|---|\n| valeur | valeur |\n\n" +
+    "N'utilise jamais de simples barres verticales sans cette ligne de séparation.";
+
+  let outMessages = messages;
+  if (!wantsImage && !messages.some((m) => m.role === "system")) {
+    const sys =
+      typeof system === "string" && system.trim()
+        ? system.trim() + "\n\n" + MARKDOWN_HINT
+        : MARKDOWN_HINT;
+    outMessages = [{ role: "system", content: sys }, ...messages];
+  }
+
+  // Payload OpenRouter.
   const payload = { model, messages: outMessages, stream: true };
-  // Si le front demande une sortie image (génération), on l'active.
   if (Array.isArray(modalities) && modalities.length) {
     payload.modalities = modalities;
   }
+  // Réglages d'inférence (si fournis et valides).
+  if (typeof temperature === "number" && temperature >= 0 && temperature <= 2) {
+    payload.temperature = temperature;
+  }
+  if (typeof max_tokens === "number" && max_tokens > 0) {
+    payload.max_tokens = Math.floor(max_tokens);
+  }
+  // Demande le décompte de tokens + coût dans le flux (dernier chunk).
+  payload.usage = { include: true };
 
   let upstream;
   try {

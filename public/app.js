@@ -13,6 +13,11 @@ const state = {
   pending: [],         // pièces jointes en attente : {type,name,mime,dataUrl,text?}
   onlyImageModels: false, // filtre : n'afficher que les modèles qui génèrent des images
   expanded: {},        // groupes explicitement ouverts : { "prov:OpenAI": true }
+  systemPrompt: "",    // instructions système de la discussion courante
+  settings: {          // réglages d'inférence (persistés globalement)
+    temperature: Number(localStorage.getItem("set-temperature") ?? 1),
+    maxTokens: Number(localStorage.getItem("set-maxtokens") ?? 0), // 0 = illimité
+  },
 };
 
 // ---------- Raccourcis DOM ----------
@@ -43,6 +48,12 @@ const el = {
   lightboxImg: $("#lightbox-img"),
   lightboxClose: $("#lightbox-close"),
   lightboxDl: $("#lightbox-dl"),
+  settingsBtn: $("#settings-btn"),
+  settingsPanel: $("#settings-panel"),
+  systemPrompt: $("#system-prompt"),
+  tempRange: $("#temp-range"),
+  tempVal: $("#temp-val"),
+  maxTok: $("#maxtok"),
 };
 
 // ---------- Lightbox ----------
@@ -116,6 +127,71 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
 function renderMarkdown(text) {
   const raw = md.render(text || "");
   return window.DOMPurify.sanitize(raw, { ADD_ATTR: ["target"] });
+}
+
+// ---------- Coût / tokens ----------
+// Normalise l'objet usage d'OpenRouter en { in, out, total, cost }.
+function normalizeUsage(usage, model) {
+  if (!usage) return null;
+  return {
+    in: usage.prompt_tokens ?? usage.input_tokens ?? 0,
+    out: usage.completion_tokens ?? usage.output_tokens ?? 0,
+    total: usage.total_tokens ?? 0,
+    cost: typeof usage.cost === "number" ? usage.cost : null,
+  };
+}
+
+// Formate un usage pour l'affichage compact sous une réponse.
+function formatUsage(u) {
+  if (!u) return "";
+  const toks = `${u.total || u.in + u.out} tok`;
+  return u.cost != null ? `${toks} · $${u.cost.toFixed(u.cost < 0.01 ? 5 : 4)}` : toks;
+}
+
+// Total de la discussion (somme des usages assistant).
+function chatTotals() {
+  let tokens = 0,
+    cost = 0,
+    hasCost = false;
+  for (const m of state.messages) {
+    if (m.role === "assistant" && m.usage) {
+      tokens += m.usage.total || m.usage.in + m.usage.out;
+      if (m.usage.cost != null) {
+        cost += m.usage.cost;
+        hasCost = true;
+      }
+    }
+  }
+  return { tokens, cost, hasCost };
+}
+
+// Met à jour la barre de coût total (dans la topbar).
+function renderCostBar() {
+  const { tokens, cost, hasCost } = chatTotals();
+  if (!tokens) {
+    el.status.textContent = "";
+    return;
+  }
+  el.status.textContent =
+    `Σ ${tokens} tok` + (hasCost ? ` · $${cost.toFixed(cost < 0.01 ? 5 : 4)}` : "");
+}
+
+// Copie le contenu d'un bloc de code (bouton injecté au survol).
+function enhanceCodeBlocks(container) {
+  for (const pre of container.querySelectorAll("pre")) {
+    if (pre.querySelector(".code-copy")) continue;
+    const btn = document.createElement("button");
+    btn.className = "code-copy";
+    btn.textContent = "Copier";
+    btn.addEventListener("click", () => {
+      const code = pre.querySelector("code");
+      navigator.clipboard.writeText(code ? code.textContent : pre.textContent).then(() => {
+        btn.textContent = "Copié ✓";
+        setTimeout(() => (btn.textContent = "Copier"), 1200);
+      });
+    });
+    pre.appendChild(btn);
+  }
 }
 
 function setStatus(msg) {
@@ -215,8 +291,10 @@ function makeMessageEl(role, content, msg = {}) {
   // Texte : markdown pour l'assistant, brut sinon.
   if (content) {
     const textEl = document.createElement("div");
-    if (role === "assistant") textEl.innerHTML = renderMarkdown(content);
-    else textEl.textContent = content;
+    if (role === "assistant") {
+      textEl.innerHTML = renderMarkdown(content);
+      enhanceCodeBlocks(textEl);
+    } else textEl.textContent = content;
     bubble.appendChild(textEl);
   }
 
@@ -228,6 +306,61 @@ function makeMessageEl(role, content, msg = {}) {
   }
 
   wrap.appendChild(bubble);
+
+  // Barre d'actions (copier / régénérer / éditer) sous la bulle.
+  if (role === "assistant" || role === "user") {
+    const actions = document.createElement("div");
+    actions.className = "msg-actions";
+
+    if (content) {
+      const copyBtn = document.createElement("button");
+      copyBtn.className = "msg-act";
+      copyBtn.textContent = "⧉ Copier";
+      copyBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(content).then(() => {
+          copyBtn.textContent = "✓ Copié";
+          setTimeout(() => (copyBtn.textContent = "⧉ Copier"), 1200);
+        });
+      });
+      actions.appendChild(copyBtn);
+    }
+
+    if (role === "assistant") {
+      // Régénérer : seulement pour la dernière réponse assistant.
+      const lastAssistant = [...state.messages]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      if (msg === lastAssistant) {
+        const reg = document.createElement("button");
+        reg.className = "msg-act";
+        reg.textContent = "↻ Régénérer";
+        reg.addEventListener("click", regenerateLast);
+        actions.appendChild(reg);
+      }
+      // Coût / tokens de cette réponse, si connu.
+      if (msg.usage) {
+        const cost = document.createElement("span");
+        cost.className = "msg-cost";
+        cost.textContent = formatUsage(msg.usage);
+        cost.title = "Tokens et coût de cette réponse";
+        actions.appendChild(cost);
+      }
+    }
+
+    if (role === "user") {
+      const idx = state.messages.indexOf(msg);
+      if (idx !== -1) {
+        const ed = document.createElement("button");
+        ed.className = "msg-act";
+        ed.textContent = "✎ Éditer";
+        ed.addEventListener("click", () => editUserMessage(idx));
+        actions.appendChild(ed);
+      }
+    }
+
+    if (actions.children.length) wrap.appendChild(actions);
+  }
+
   return wrap;
 }
 
@@ -272,14 +405,17 @@ async function openChat(id) {
     state.title = data.title;
     state.messages = data.messages || [];
     state.createdAt = data.createdAt || Date.now();
+    state.systemPrompt = data.systemPrompt || "";
     state.pending = [];
     renderAttachments();
+    el.settingsBtn.classList.toggle("has-system", Boolean(state.systemPrompt.trim()));
     if (data.model) {
       state.model = data.model;
       updateModelButton();
       updateFavToggle();
     }
     renderMessages();
+    renderCostBar();
     loadChatList();
     setUrlChat(data.id); // mémorise la discussion dans l'URL (#id)
   } catch (e) {
@@ -293,9 +429,12 @@ function newChat() {
   state.title = null;
   state.messages = [];
   state.createdAt = null;
+  state.systemPrompt = "";
   state.pending = [];
+  el.settingsBtn.classList.remove("has-system");
   renderAttachments();
   renderMessages();
+  renderCostBar();
   loadChatList();
   setUrlChat(null); // enlève l'id de l'URL
   el.input.focus();
@@ -339,6 +478,7 @@ async function persist() {
         title: state.title,
         model: state.model,
         messages: state.messages,
+        systemPrompt: state.systemPrompt || "",
         createdAt: state.createdAt,
       }),
     });
@@ -693,44 +833,24 @@ function buildApiMessages() {
 }
 
 // ---------- Envoi + streaming ----------
-async function sendMessage() {
-  const text = el.input.value.trim();
-  const atts = state.pending.slice();
-  if ((!text && atts.length === 0) || state.streaming) return;
-  if (!state.model) {
-    setStatus("⚠️ choisis un modèle d'abord");
-    return;
-  }
 
-  // Message utilisateur (texte + pièces jointes).
-  const userMsg = { role: "user", content: text, attachments: atts };
-  state.messages.push(userMsg);
-  el.input.value = "";
-  state.pending = [];
-  renderAttachments();
-  autoGrow();
-  if (el.messages.querySelector(".empty-state")) el.messages.innerHTML = "";
-  el.messages.appendChild(makeMessageEl("user", text, userMsg));
-
-  // Bulle assistant vide, avec curseur.
-  const assistantMsg = { role: "assistant", content: "", images: [] };
-  const assistantEl = makeMessageEl("assistant", "", assistantMsg);
+// Cœur du streaming : envoie l'historique courant à OpenRouter et remplit
+// `assistantMsg` (déjà rendu dans `assistantEl`). Retourne l'issue.
+async function streamAssistant(assistantMsg, assistantEl) {
   const bubble = assistantEl.querySelector(".bubble");
   bubble.classList.add("cursor");
-  el.messages.appendChild(assistantEl);
-  scrollToBottom();
 
   state.streaming = true;
   el.send.disabled = true;
   el.stop.hidden = false;
   setStatus("génération…");
-
   state.abortController = new AbortController();
+
   let acc = "";
   const genImages = [];
+  let usage = null;
   let gotError = null;
 
-  // Ré-affiche la bulle (texte markdown + images générées).
   const repaint = () => {
     bubble.innerHTML = "";
     if (acc) {
@@ -738,9 +858,7 @@ async function sendMessage() {
       t.innerHTML = renderMarkdown(acc);
       bubble.appendChild(t);
     }
-    for (const src of genImages) {
-      bubble.appendChild(makeGenImage(src));
-    }
+    for (const src of genImages) bubble.appendChild(makeGenImage(src));
   };
 
   const cm = currentModel();
@@ -753,6 +871,9 @@ async function sendMessage() {
       body: JSON.stringify({
         model: state.model,
         messages: buildApiMessages(),
+        system: state.systemPrompt || undefined,
+        temperature: state.settings.temperature,
+        max_tokens: state.settings.maxTokens || undefined,
         ...(wantsImage ? { modalities: ["image", "text"] } : {}),
       }),
       signal: state.abortController.signal,
@@ -779,15 +900,15 @@ async function sendMessage() {
             typeof json.error === "string" ? json.error : json.error.message;
           return;
         }
+        // Usage / coût (OpenRouter l'envoie dans le dernier chunk).
+        if (json.usage) usage = json.usage;
         const delta = json.choices?.[0]?.delta;
         if (!delta) return;
-        // Texte
         if (typeof delta.content === "string" && delta.content) {
           acc += delta.content;
           repaint();
           scrollToBottom();
         }
-        // Images générées : delta.images = [{ image_url: { url } }]
         if (Array.isArray(delta.images)) {
           for (const im of delta.images) {
             const url = im?.image_url?.url || im?.url;
@@ -814,11 +935,7 @@ async function sendMessage() {
     buffer += decoder.decode();
     if (buffer.trim()) handleLine(buffer.replace(/\r$/, ""));
   } catch (e) {
-    if (e.name === "AbortError") {
-      // Arrêt volontaire : on garde ce qui a été reçu.
-    } else {
-      gotError = e.message;
-    }
+    if (e.name !== "AbortError") gotError = e.message;
   }
 
   bubble.classList.remove("cursor");
@@ -829,28 +946,65 @@ async function sendMessage() {
   setStatus("");
 
   const gotSomething = acc || genImages.length > 0;
+  assistantMsg.content = acc;
+  assistantMsg.images = genImages;
+  if (usage) assistantMsg.usage = normalizeUsage(usage, cm);
 
+  return { gotSomething, gotError, repaint };
+}
+
+async function sendMessage() {
+  const text = el.input.value.trim();
+  const atts = state.pending.slice();
+  if ((!text && atts.length === 0) || state.streaming) return;
+  if (!state.model) {
+    setStatus("⚠️ choisis un modèle d'abord");
+    return;
+  }
+
+  const userMsg = { role: "user", content: text, attachments: atts };
+  state.messages.push(userMsg);
+  el.input.value = "";
+  state.pending = [];
+  renderAttachments();
+  autoGrow();
+  if (el.messages.querySelector(".empty-state")) el.messages.innerHTML = "";
+  el.messages.appendChild(makeMessageEl("user", text, userMsg));
+
+  const assistantMsg = { role: "assistant", content: "", images: [] };
+  const assistantEl = makeMessageEl("assistant", "", assistantMsg);
+  el.messages.appendChild(assistantEl);
+  scrollToBottom();
+
+  const { gotSomething, gotError } = await streamAssistant(
+    assistantMsg,
+    assistantEl
+  );
+
+  await finishAssistant(assistantMsg, assistantEl, gotSomething, gotError);
+}
+
+// Finalise un tour assistant : gère erreurs, persistance, récents.
+async function finishAssistant(assistantMsg, assistantEl, gotSomething, gotError) {
   if (gotError) {
     if (gotSomething) {
-      assistantMsg.content = acc;
-      assistantMsg.images = genImages;
       state.messages.push(assistantMsg);
-      repaint();
+      assistantEl.replaceWith(makeMessageEl("assistant", assistantMsg.content, assistantMsg));
       el.messages.appendChild(makeMessageEl("error", gotError));
     } else {
       assistantEl.replaceWith(makeMessageEl("error", gotError));
     }
     state.messages.push({ role: "error", content: gotError });
     await persist();
+    renderCostBar();
     el.input.focus();
     return;
   }
 
   if (gotSomething) {
-    assistantMsg.content = acc;
-    assistantMsg.images = genImages;
     state.messages.push(assistantMsg);
-    repaint();
+    // Re-rend proprement la bulle avec ses actions (copier/régénérer).
+    assistantEl.replaceWith(makeMessageEl("assistant", assistantMsg.content, assistantMsg));
     pushRecent(state.model);
     populateModels();
   } else {
@@ -858,7 +1012,55 @@ async function sendMessage() {
     state.messages.push({ role: "error", content: "(réponse vide)" });
   }
   await persist();
+  renderCostBar();
   el.input.focus();
+}
+
+// Régénère la dernière réponse de l'assistant.
+async function regenerateLast() {
+  if (state.streaming) return;
+  // Retire le dernier tour assistant (et une éventuelle erreur qui suit).
+  while (
+    state.messages.length &&
+    (state.messages[state.messages.length - 1].role === "error" ||
+      state.messages[state.messages.length - 1].role === "assistant")
+  ) {
+    if (state.messages[state.messages.length - 1].role === "assistant") {
+      state.messages.pop();
+      break;
+    }
+    state.messages.pop();
+  }
+  renderMessages();
+
+  const assistantMsg = { role: "assistant", content: "", images: [] };
+  const assistantEl = makeMessageEl("assistant", "", assistantMsg);
+  el.messages.appendChild(assistantEl);
+  scrollToBottom();
+
+  const { gotSomething, gotError } = await streamAssistant(assistantMsg, assistantEl);
+  await finishAssistant(assistantMsg, assistantEl, gotSomething, gotError);
+}
+
+// Édite un message utilisateur (par index) et relance depuis là.
+async function editUserMessage(index) {
+  if (state.streaming) return;
+  const msg = state.messages[index];
+  if (!msg || msg.role !== "user") return;
+  const nv = prompt("Modifier ton message :", msg.content);
+  if (nv === null) return;
+  msg.content = nv;
+  // On supprime tout ce qui suit ce message (réponses obsolètes).
+  state.messages = state.messages.slice(0, index + 1);
+  renderMessages();
+
+  const assistantMsg = { role: "assistant", content: "", images: [] };
+  const assistantEl = makeMessageEl("assistant", "", assistantMsg);
+  el.messages.appendChild(assistantEl);
+  scrollToBottom();
+
+  const { gotSomething, gotError } = await streamAssistant(assistantMsg, assistantEl);
+  await finishAssistant(assistantMsg, assistantEl, gotSomething, gotError);
 }
 
 function stopStreaming() {
@@ -971,6 +1173,48 @@ el.lightbox.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !el.lightbox.hidden) closeLightbox();
+});
+
+// ---------- Panneau instructions & réglages ----------
+function syncSettingsUI() {
+  el.systemPrompt.value = state.systemPrompt || "";
+  el.tempRange.value = state.settings.temperature;
+  el.tempVal.textContent = Number(state.settings.temperature).toFixed(1);
+  el.maxTok.value = state.settings.maxTokens || 0;
+}
+el.settingsBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (el.settingsPanel.hidden) {
+    syncSettingsUI();
+    el.settingsPanel.hidden = false;
+  } else {
+    el.settingsPanel.hidden = true;
+  }
+});
+document.addEventListener("click", (e) => {
+  if (
+    !el.settingsPanel.hidden &&
+    !el.settingsPanel.contains(e.target) &&
+    e.target !== el.settingsBtn
+  ) {
+    el.settingsPanel.hidden = true;
+  }
+});
+// Le prompt système est propre à la discussion → persisté avec elle.
+el.systemPrompt.addEventListener("input", () => {
+  state.systemPrompt = el.systemPrompt.value;
+  el.settingsBtn.classList.toggle("has-system", Boolean(state.systemPrompt.trim()));
+  if (state.chatId) persist();
+});
+// Température et max tokens sont globaux → localStorage.
+el.tempRange.addEventListener("input", () => {
+  state.settings.temperature = Number(el.tempRange.value);
+  el.tempVal.textContent = state.settings.temperature.toFixed(1);
+  localStorage.setItem("set-temperature", state.settings.temperature);
+});
+el.maxTok.addEventListener("input", () => {
+  state.settings.maxTokens = Math.max(0, Number(el.maxTok.value) || 0);
+  localStorage.setItem("set-maxtokens", state.settings.maxTokens);
 });
 
 // Pièces jointes : bouton, drag & drop, coller.
@@ -1088,6 +1332,7 @@ function showNoKeyBanner() {
 // ---------- Démarrage ----------
 (async function init() {
   renderMessages();
+  syncSettingsUI();
   let hasKey = true;
   try {
     const r = await fetch("/api/config");

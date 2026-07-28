@@ -653,3 +653,95 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 }
 #lightbox-toolbar a:hover,
 #lightbox-toolbar button:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* ---------- Actions sur les messages ---------- */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.msg:hover .msg-actions { opacity: 1; }
+.msg.user .msg-actions { justify-content: flex-end; }
+.msg-act {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 7px;
+}
+.msg-act:hover { background: var(--bg-elev-2); color: var(--text); border-color: var(--border); }
+.msg-cost {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-left: 2px;
+  white-space: nowrap;
+}
+
+/* Bouton copier sur les blocs de code */
+.msg .bubble pre { position: relative; }
+.code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.msg .bubble pre:hover .code-copy { opacity: 1; }
+.code-copy:hover { color: var(--text); border-color: var(--accent); }
+
+/* ---------- Panneau instructions & réglages ---------- */
+#settings-btn { font-size: 17px; }
+#settings-panel {
+  position: absolute;
+  top: 52px;
+  right: 12px;
+  width: 340px;
+  max-width: 90vw;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.14);
+  z-index: 40;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#settings-panel[hidden] { display: none; }
+.sp-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 8px;
+}
+.sp-label:first-child { margin-top: 0; }
+#system-prompt {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  border-radius: 8px;
+  padding: 8px;
+}
+#temp-range { width: 100%; }
+#maxtok { width: 100%; border-radius: 8px; }
+.sp-hint { font-size: 11px; color: var(--text-muted); }
+
+/* Indicateur : un prompt système est actif sur cette discussion */
+#settings-btn.has-system {
+  color: var(--accent);
+  background: var(--user-bubble);
+  border-radius: 8px;
+}
