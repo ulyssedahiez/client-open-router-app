@@ -89,17 +89,44 @@
     <img id="lightbox-img" alt="image agrandie" />
   </div>
 
-  <!-- Modale : instructions système + réglages -->
+  <!-- Modale GÉNÉRALE (⚙ en haut) : prompt système + réglages par défaut -->
   <div id="settings-modal" class="modal-backdrop" hidden>
     <div class="modal">
       <div class="modal-head">
-        <h3>Instructions &amp; réglages</h3>
+        <h3>Instructions &amp; défauts</h3>
         <button id="settings-close" class="modal-x" title="Fermer"></button>
       </div>
       <div class="modal-body">
         <label class="sp-label" for="system-prompt">Instructions système (cette discussion)</label>
         <textarea id="system-prompt" rows="4"
           placeholder="Ex. : Réponds en français, de façon concise. Tu es un expert en…"></textarea>
+        <div class="sp-hint">Guide le comportement du modèle pour cette discussion.</div>
+
+        <div class="sp-defaults">
+          <div class="sp-label">Réglages par défaut</div>
+          <div class="sp-hint">Appliqués à chaque nouvelle discussion. Ajuste les valeurs de cette discussion (⚙ en bas), puis :</div>
+          <button id="set-default-btn" class="btn-outline">Enregistrer les réglages actuels comme défaut</button>
+          <span id="set-default-ok" class="sp-ok" hidden>✓ Enregistré comme défaut</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modale RAPIDE (⚙ en bas) : réglages de génération de cette discussion -->
+  <div id="quick-modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Réglages de la discussion</h3>
+        <button id="quick-close" class="modal-x" title="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <label class="sp-label sp-toggle" for="web-search">
+          <span>
+            Recherche internet
+            <span class="sp-hint">Le modèle peut chercher sur le web (selon compatibilité).</span>
+          </span>
+          <input id="web-search" type="checkbox" class="switch" />
+        </label>
 
         <label class="sp-label" for="temp-range">
           Température : <span id="temp-val">1.0</span>
@@ -109,12 +136,6 @@
 
         <label class="sp-label" for="maxtok">Longueur max (tokens, 0 = illimité)</label>
         <input id="maxtok" type="number" min="0" step="128" value="0" />
-
-        <div class="sp-defaults">
-          <button id="set-default-btn" class="btn-outline">Définir comme réglages par défaut</button>
-          <div class="sp-hint">Appliqués à chaque nouvelle discussion (surchargeables ici).</div>
-          <span id="set-default-ok" class="sp-ok" hidden>✓ Enregistré comme défaut</span>
-        </div>
       </div>
     </div>
   </div>

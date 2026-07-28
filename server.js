@@ -179,7 +179,12 @@ function getConfig(res) {
 const MAX_RECENTS = 8;
 
 // Réglages par défaut d'une nouvelle discussion.
-const DEFAULT_SETTINGS = { temperature: 1, maxTokens: 0, systemPrompt: "" };
+const DEFAULT_SETTINGS = {
+  temperature: 1,
+  maxTokens: 0,
+  systemPrompt: "",
+  webSearch: false,
+};
 
 function sanitizeDefaults(d) {
   const out = { ...DEFAULT_SETTINGS };
@@ -190,6 +195,7 @@ function sanitizeDefaults(d) {
       out.maxTokens = Math.floor(d.maxTokens);
     if (typeof d.systemPrompt === "string")
       out.systemPrompt = d.systemPrompt.slice(0, 8000);
+    out.webSearch = Boolean(d.webSearch);
   }
   return out;
 }

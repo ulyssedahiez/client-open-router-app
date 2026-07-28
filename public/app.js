@@ -15,10 +15,10 @@ const state = {
   expanded: {},        // groupes explicitement ouverts : { "prov:OpenAI": true }
   // Réglages par défaut (côté serveur, prefs.json) : appliqués aux NOUVELLES
   // discussions. Modifiables et surchargeables au cas par cas.
-  defaults: { temperature: 1, maxTokens: 0, systemPrompt: "" },
+  defaults: { temperature: 1, maxTokens: 0, systemPrompt: "", webSearch: false },
   // Réglages de la discussion COURANTE (seed depuis defaults, persistés avec le chat).
   systemPrompt: "",
-  settings: { temperature: 1, maxTokens: 0 },
+  settings: { temperature: 1, maxTokens: 0, webSearch: false },
 };
 
 // ---------- Raccourcis DOM ----------
@@ -53,7 +53,10 @@ const el = {
   settingsBtnBottom: $("#settings-btn-bottom"),
   settingsModal: $("#settings-modal"),
   settingsClose: $("#settings-close"),
+  quickModal: $("#quick-modal"),
+  quickClose: $("#quick-close"),
   systemPrompt: $("#system-prompt"),
+  webSearch: $("#web-search"),
   tempRange: $("#temp-range"),
   tempVal: $("#temp-val"),
   maxTok: $("#maxtok"),
@@ -488,10 +491,11 @@ async function openChat(id) {
     state.settings = {
       temperature: Number(data.settings?.temperature ?? state.defaults.temperature),
       maxTokens: Number(data.settings?.maxTokens ?? state.defaults.maxTokens),
+      webSearch: Boolean(data.settings?.webSearch ?? state.defaults.webSearch),
     };
     state.pending = [];
     renderAttachments();
-    el.settingsBtn.classList.toggle("has-system", Boolean(state.systemPrompt.trim()));
+    updateSettingsIndicators();
     if (data.model) {
       state.model = data.model;
       updateModelButton();
@@ -514,7 +518,7 @@ function newChat() {
   state.createdAt = null;
   state.pending = [];
   applyDefaultsToCurrent(); // nouvelle discussion = réglages par défaut
-  el.settingsBtn.classList.toggle("has-system", Boolean(state.systemPrompt.trim()));
+  updateSettingsIndicators();
   renderAttachments();
   renderMessages();
   renderCostBar();
@@ -790,6 +794,7 @@ function updateModelButton() {
 function selectModel(id) {
   state.model = id;
   localStorage.setItem("last-model", id);
+  pushRecent(id); // remonte le modèle dans les récents dès la sélection
   updateModelButton();
   updateFavToggle();
   renderTree();
@@ -808,6 +813,7 @@ async function loadPrefs() {
         temperature: Number(p.defaults.temperature ?? 1),
         maxTokens: Number(p.defaults.maxTokens ?? 0),
         systemPrompt: p.defaults.systemPrompt || "",
+        webSearch: Boolean(p.defaults.webSearch),
       };
     }
   } catch {
@@ -823,6 +829,7 @@ function applyDefaultsToCurrent() {
   state.settings = {
     temperature: state.defaults.temperature,
     maxTokens: state.defaults.maxTokens,
+    webSearch: state.defaults.webSearch,
   };
   state.systemPrompt = state.defaults.systemPrompt || "";
 }
@@ -838,6 +845,15 @@ async function saveDefaults() {
   } catch {
     setStatus("⚠️ défauts non sauvés");
   }
+}
+
+// Indicateurs visuels sur les boutons ⚙ (prompt système / recherche web actifs).
+function updateSettingsIndicators() {
+  el.settingsBtn.classList.toggle("has-system", Boolean(state.systemPrompt.trim()));
+  el.settingsBtnBottom.classList.toggle(
+    "has-web",
+    Boolean(state.settings.webSearch)
+  );
 }
 
 function updateFavToggle() {
@@ -970,7 +986,7 @@ async function streamAssistant(assistantMsg, assistantEl) {
   bubble.classList.add("cursor");
 
   state.streaming = true;
-  el.send.disabled = true;
+  el.send.hidden = true; // Stop remplace Envoyer pendant la génération
   el.stop.hidden = false;
   setStatus("génération…");
   state.abortController = new AbortController();
@@ -992,13 +1008,18 @@ async function streamAssistant(assistantMsg, assistantEl) {
 
   const cm = currentModel();
   const wantsImage = cm && cm.canImageOut;
+  // Recherche web : suffixe :online sur l'id du modèle (activation OpenRouter).
+  const modelId =
+    state.settings.webSearch && !wantsImage && !state.model.endsWith(":online")
+      ? state.model + ":online"
+      : state.model;
 
   try {
     const r = await fetch("/api/chat", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: state.model,
+        model: modelId,
         messages: buildApiMessages(),
         system: state.systemPrompt || undefined,
         temperature: state.settings.temperature,
@@ -1070,7 +1091,7 @@ async function streamAssistant(assistantMsg, assistantEl) {
   bubble.classList.remove("cursor");
   state.streaming = false;
   state.abortController = null;
-  el.send.disabled = false;
+  el.send.hidden = false; // on ré-affiche Envoyer
   el.stop.hidden = true;
   setStatus("");
 
@@ -1302,16 +1323,21 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!el.lightbox.hidden) closeLightbox();
   else if (!el.settingsModal.hidden) closeSettings();
+  else if (!el.quickModal.hidden) closeQuick();
   else if (!el.usageModal.hidden) el.usageModal.hidden = true;
 });
 
-// ---------- Modale instructions & réglages ----------
+// ---------- Modales réglages (générale + rapide) ----------
+// Synchronise les champs des deux modales avec l'état courant.
 function syncSettingsUI() {
   el.systemPrompt.value = state.systemPrompt || "";
   el.tempRange.value = state.settings.temperature;
   el.tempVal.textContent = Number(state.settings.temperature).toFixed(1);
   el.maxTok.value = state.settings.maxTokens || 0;
+  el.webSearch.checked = Boolean(state.settings.webSearch);
 }
+
+// ⚙ HAUT : instructions système + réglages par défaut.
 function openSettings() {
   syncSettingsUI();
   el.setDefaultOk.hidden = true;
@@ -1321,16 +1347,29 @@ function closeSettings() {
   el.settingsModal.hidden = true;
 }
 el.settingsBtn.addEventListener("click", openSettings);
-el.settingsBtnBottom.addEventListener("click", openSettings);
 el.settingsClose.addEventListener("click", closeSettings);
 el.settingsModal.addEventListener("click", (e) => {
   if (e.target === el.settingsModal) closeSettings();
 });
 
-// Réglages de la DISCUSSION courante (persistés avec elle).
+// ⚙ BAS : réglages rapides de la discussion (température, longueur, web).
+function openQuick() {
+  syncSettingsUI();
+  el.quickModal.hidden = false;
+}
+function closeQuick() {
+  el.quickModal.hidden = true;
+}
+el.settingsBtnBottom.addEventListener("click", openQuick);
+el.quickClose.addEventListener("click", closeQuick);
+el.quickModal.addEventListener("click", (e) => {
+  if (e.target === el.quickModal) closeQuick();
+});
+
+// --- Champs (persistés avec la discussion) ---
 el.systemPrompt.addEventListener("input", () => {
   state.systemPrompt = el.systemPrompt.value;
-  el.settingsBtn.classList.toggle("has-system", Boolean(state.systemPrompt.trim()));
+  updateSettingsIndicators();
   if (state.chatId) persist();
 });
 el.tempRange.addEventListener("input", () => {
@@ -1342,13 +1381,19 @@ el.maxTok.addEventListener("input", () => {
   state.settings.maxTokens = Math.max(0, Number(el.maxTok.value) || 0);
   if (state.chatId) persist();
 });
+el.webSearch.addEventListener("change", () => {
+  state.settings.webSearch = el.webSearch.checked;
+  el.settingsBtnBottom.classList.toggle("has-web", el.webSearch.checked);
+  if (state.chatId) persist();
+});
 
-// « Définir comme défaut » : copie les réglages courants dans les défauts.
+// « Enregistrer comme défaut » : copie les réglages courants dans les défauts.
 el.setDefaultBtn.addEventListener("click", async () => {
   state.defaults = {
     temperature: state.settings.temperature,
     maxTokens: state.settings.maxTokens,
     systemPrompt: state.systemPrompt || "",
+    webSearch: Boolean(state.settings.webSearch),
   };
   await saveDefaults();
   el.setDefaultOk.hidden = false;

@@ -969,15 +969,49 @@ input:focus, textarea:focus, select:focus {
   font-weight: 600;
   font-size: 13px;
 }
-.btn-outline:hover { border-color: var(--accent); color: var(--accent); }
-.sp-ok { font-size: 12px; color: #1a9c5b; }
+.btn-outline:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.sp-ok { font-size: 12px; color: #1a9c5b; font-weight: 600; }
+.sp-label .sp-hint { display: block; font-weight: 400; margin-top: 2px; }
 
-/* Indicateur : un prompt système est actif sur cette discussion */
-#settings-btn.has-system {
-  color: var(--accent);
-  background: var(--user-bubble);
-  border-radius: 8px;
+/* Interrupteur (toggle) pour la recherche web */
+.sp-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
 }
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 44px;
+  height: 26px;
+  border-radius: 20px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.18s ease;
+}
+.switch:checked { background: var(--accent-grad); border-color: transparent; }
+.switch:checked::after { transform: translateX(18px); }
+
+/* Indicateurs sur les boutons ⚙ */
+#settings-btn.has-system { color: var(--accent); background: var(--accent-soft); }
+#settings-btn-bottom.has-web { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
 
 /* Tableau du bilan de consommation */
 #usage-body .usage-total {
