@@ -179,25 +179,21 @@ function getConfig(res) {
 const MAX_RECENTS = 8;
 
 // Réglages par défaut d'une nouvelle discussion.
-const DEFAULT_SETTINGS = {
-  temperature: 1,
-  maxTokens: 0,
-  systemPrompt: "",
-  webSearch: false,
-};
+const DEFAULT_SETTINGS = { systemPrompt: "", webSearch: false, params: {} };
 
 function sanitizeDefaults(d) {
-  const out = { ...DEFAULT_SETTINGS };
+  const out = { systemPrompt: "", webSearch: false, params: {} };
   if (d && typeof d === "object") {
-    if (typeof d.temperature === "number" && d.temperature >= 0 && d.temperature <= 2)
-      out.temperature = d.temperature;
-    if (typeof d.maxTokens === "number" && d.maxTokens >= 0)
-      out.maxTokens = Math.floor(d.maxTokens);
     if (typeof d.systemPrompt === "string")
       out.systemPrompt = d.systemPrompt.slice(0, 8000);
     out.webSearch = Boolean(d.webSearch);
-    // Réglages avancés : on stocke tel quel (objet simple) s'il est fourni.
-    if (d.adv && typeof d.adv === "object") out.adv = d.adv;
+    // Map de paramètres : on stocke les valeurs simples (nombre / chaîne).
+    if (d.params && typeof d.params === "object") {
+      for (const [k, v] of Object.entries(d.params)) {
+        if (typeof v === "number" && Number.isFinite(v)) out.params[k] = v;
+        else if (typeof v === "string" && v) out.params[k] = v;
+      }
+    }
   }
   return out;
 }
@@ -345,6 +341,55 @@ async function getModels(res) {
   }
 }
 
+// Liste blanche des paramètres d'inférence relayés à OpenRouter, avec bornes.
+const PARAM_RULES = {
+  temperature: { type: "number", min: 0, max: 2 },
+  top_p: { type: "number", min: 0, max: 1 },
+  top_k: { type: "int", min: 0, max: 10000 },
+  min_p: { type: "number", min: 0, max: 1 },
+  top_a: { type: "number", min: 0, max: 1 },
+  frequency_penalty: { type: "number", min: -2, max: 2 },
+  presence_penalty: { type: "number", min: -2, max: 2 },
+  repetition_penalty: { type: "number", min: 0, max: 2 },
+  max_tokens: { type: "int", min: 1, max: 200000 },
+  seed: { type: "int", min: -2147483648, max: 2147483647 },
+  stop: { type: "stringArray" },
+  verbosity: { type: "enum", values: ["low", "medium", "high"] },
+};
+
+// Applique une source de paramètres { param: valeur } sur le payload OpenRouter,
+// en validant selon PARAM_RULES. Ne réécrit pas un paramètre déjà posé.
+function applyParams(payload, src) {
+  if (!src || typeof src !== "object") return;
+  // reasoning_effort a un format spécial.
+  if (
+    payload.reasoning === undefined &&
+    ["low", "medium", "high"].includes(src.reasoning_effort)
+  ) {
+    payload.reasoning = { effort: src.reasoning_effort };
+  }
+  for (const [key, rule] of Object.entries(PARAM_RULES)) {
+    if (payload[key] !== undefined) continue; // déjà posé (priorité à `params`)
+    const v = src[key];
+    if (v == null) continue;
+    if (rule.type === "number" && typeof v === "number" && v >= rule.min && v <= rule.max) {
+      payload[key] = v;
+    } else if (rule.type === "int" && Number.isFinite(v) && v >= rule.min && v <= rule.max) {
+      payload[key] = Math.floor(v);
+    } else if (rule.type === "stringArray") {
+      const arr = Array.isArray(v)
+        ? v
+        : typeof v === "string"
+          ? v.split(",").map((s) => s.trim())
+          : [];
+      const clean = arr.filter((s) => typeof s === "string" && s).slice(0, 4);
+      if (clean.length) payload[key] = clean;
+    } else if (rule.type === "enum" && rule.values.includes(v)) {
+      payload[key] = v;
+    }
+  }
+}
+
 // POST /api/chat -> proxy streaming vers OpenRouter
 async function chat(req, res) {
   if (!API_KEY) {
@@ -359,20 +404,7 @@ async function chat(req, res) {
     return sendJSON(res, 400, { error: String(e.message || e) });
   }
 
-  const {
-    model,
-    messages,
-    modalities,
-    system,
-    temperature,
-    max_tokens,
-    top_p,
-    frequency_penalty,
-    presence_penalty,
-    seed,
-    reasoning_effort,
-    stop,
-  } = body;
+  const { model, messages, modalities, system, params } = body;
   if (!model || !Array.isArray(messages) || messages.length === 0) {
     return sendJSON(res, 400, { error: "model et messages requis" });
   }
@@ -404,41 +436,12 @@ async function chat(req, res) {
   if (Array.isArray(modalities) && modalities.length) {
     payload.modalities = modalities;
   }
-  // Réglages d'inférence (si fournis et valides).
-  if (typeof temperature === "number" && temperature >= 0 && temperature <= 2) {
-    payload.temperature = temperature;
-  }
-  if (typeof max_tokens === "number" && max_tokens > 0) {
-    payload.max_tokens = Math.floor(max_tokens);
-  }
-  // --- Réglages avancés ---
-  if (typeof top_p === "number" && top_p > 0 && top_p <= 1) {
-    payload.top_p = top_p;
-  }
-  if (
-    typeof frequency_penalty === "number" &&
-    frequency_penalty >= -2 &&
-    frequency_penalty <= 2
-  ) {
-    payload.frequency_penalty = frequency_penalty;
-  }
-  if (
-    typeof presence_penalty === "number" &&
-    presence_penalty >= -2 &&
-    presence_penalty <= 2
-  ) {
-    payload.presence_penalty = presence_penalty;
-  }
-  if (Number.isInteger(seed)) {
-    payload.seed = seed;
-  }
-  if (["low", "medium", "high"].includes(reasoning_effort)) {
-    // Format OpenRouter : { reasoning: { effort } }
-    payload.reasoning = { effort: reasoning_effort };
-  }
-  if (Array.isArray(stop) && stop.length) {
-    payload.stop = stop.filter((s) => typeof s === "string" && s).slice(0, 4);
-  }
+  // Paramètres d'inférence : le front envoie une map { param: valeur }.
+  // On les relaie à OpenRouter en filtrant sur une liste blanche de paramètres
+  // sûrs et en bornant les valeurs. `reasoning_effort` → { reasoning: { effort } }.
+  applyParams(payload, params);
+  // Rétrocompat : anciens champs à plat (temperature/max_tokens/etc.).
+  applyParams(payload, body);
   // Demande le décompte de tokens + coût dans le flux (dernier chunk).
   payload.usage = { include: true };
 

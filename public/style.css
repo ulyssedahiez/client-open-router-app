@@ -1162,3 +1162,34 @@ input:focus, textarea:focus, select:focus {
 @media (prefers-color-scheme: dark) {
   .sp-warn { color: #f5b957; background: rgba(245, 158, 11, 0.14); }
 }
+
+/* ---------- Paramètres dynamiques (modale rapide) ---------- */
+.sp-model-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 5px 10px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  display: inline-block;
+}
+.param-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.param-row:last-child { border-bottom: none; }
+.param-row .param-val {
+  color: var(--accent);
+  font-weight: 600;
+}
+.param-row input[type="range"] { width: 100%; }
+.param-row select,
+.param-row input[type="text"],
+.param-row input[type="number"] {
+  width: 100%;
+  border-radius: var(--radius-sm);
+}

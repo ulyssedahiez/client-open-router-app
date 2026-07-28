@@ -14,25 +14,95 @@ const state = {
   onlyImageModels: false, // filtre : n'afficher que les modèles qui génèrent des images
   expanded: {},        // groupes explicitement ouverts : { "prov:OpenAI": true }
   // Réglages par défaut (côté serveur, prefs.json) : appliqués aux NOUVELLES
-  // discussions. Modifiables et surchargeables au cas par cas.
-  defaults: { temperature: 1, maxTokens: 0, systemPrompt: "", webSearch: false, adv: newAdv() },
-  // Réglages de la discussion COURANTE (seed depuis defaults, persistés avec le chat).
+  // discussions. `params` = valeurs par nom de paramètre OpenRouter.
+  defaults: { systemPrompt: "", webSearch: false, params: {} },
+  // Réglages de la discussion COURANTE (persistés avec le chat).
   systemPrompt: "",
-  settings: { temperature: 1, maxTokens: 0, webSearch: false, adv: newAdv() },
+  settings: { webSearch: false, params: {} },
   quote: null,         // passage cité en attente (quote-reply)
 };
 
-// Réglages avancés vides (valeurs "non définies" = on n'envoie pas le paramètre).
-function newAdv() {
-  return {
-    topP: null,        // 0..1
-    freqPenalty: null, // -2..2
-    presPenalty: null, // -2..2
-    seed: null,        // entier
-    reasoning: "",     // "" | "low" | "medium" | "high"
-    stop: "",          // séquences séparées par des virgules
-  };
-}
+// ---------- Registre des paramètres OpenRouter ----------
+// Décrit COMMENT rendre chaque paramètre. Ceux absents d'ici mais présents dans
+// model.supported reçoivent un champ texte générique (rien n'est perdu).
+// `send(v)` transforme la valeur d'UI en valeur envoyée à l'API (null = ne pas envoyer).
+const PARAM_SPECS = {
+  temperature: {
+    label: "Température", type: "range", min: 0, max: 2, step: 0.1, default: 1,
+    hint: "0 = précis/déterministe · 2 = très créatif. « auto » = non envoyé.",
+    autoAt: 1,
+  },
+  top_p: {
+    label: "Top P", type: "range", min: 0, max: 1, step: 0.05, default: 1,
+    hint: "Alternative à la température (0.1–1). « auto » = non envoyé.", autoAt: 1,
+  },
+  top_k: {
+    label: "Top K", type: "int", min: 0, step: 1,
+    hint: "Limite au K tokens les plus probables (0 = désactivé).",
+  },
+  min_p: {
+    label: "Min P", type: "range", min: 0, max: 1, step: 0.01, default: 0,
+    hint: "Probabilité minimale relative d'un token.", autoAt: 0,
+  },
+  top_a: {
+    label: "Top A", type: "range", min: 0, max: 1, step: 0.01, default: 0,
+    hint: "Filtrage adaptatif (0 = désactivé).", autoAt: 0,
+  },
+  frequency_penalty: {
+    label: "Frequency penalty", type: "range", min: -2, max: 2, step: 0.1, default: 0,
+    hint: "Positif = moins de répétitions de mots.", autoAt: 0,
+  },
+  presence_penalty: {
+    label: "Presence penalty", type: "range", min: -2, max: 2, step: 0.1, default: 0,
+    hint: "Positif = pousse à aborder de nouveaux sujets.", autoAt: 0,
+  },
+  repetition_penalty: {
+    label: "Repetition penalty", type: "range", min: 0.1, max: 2, step: 0.05, default: 1,
+    hint: "> 1 réduit les répétitions.", autoAt: 1,
+  },
+  max_tokens: {
+    label: "Longueur max (tokens)", type: "int", min: 0, step: 128,
+    hint: "0 = illimité.",
+  },
+  seed: {
+    label: "Seed (reproductibilité)", type: "int", step: 1,
+    hint: "Fixe l'aléatoire pour des réponses reproductibles (vide = aléatoire).",
+  },
+  stop: {
+    label: "Séquences d'arrêt", type: "text",
+    hint: "Séparées par des virgules. La génération s'arrête à ces chaînes.",
+  },
+  reasoning: {
+    label: "Effort de raisonnement", type: "select",
+    options: [
+      { value: "", label: "Auto (défaut du modèle)" },
+      { value: "low", label: "Faible (rapide)" },
+      { value: "medium", label: "Moyen" },
+      { value: "high", label: "Élevé (plus poussé)" },
+    ],
+    hint: "Modèles à raisonnement (GPT-5, o-series, Claude thinking).",
+  },
+  verbosity: {
+    label: "Verbosité", type: "select",
+    options: [
+      { value: "", label: "Auto" },
+      { value: "low", label: "Concis" },
+      { value: "medium", label: "Moyen" },
+      { value: "high", label: "Détaillé" },
+    ],
+    hint: "Longueur/détail de la réponse (selon modèle).",
+  },
+};
+
+// `reasoning_effort` est un alias : on l'affiche comme `reasoning`.
+const PARAM_ALIASES = { reasoning_effort: "reasoning" };
+
+// Paramètres qu'on n'expose PAS à l'utilisateur (usage API/outils, pas du chat).
+const PARAM_HIDDEN = new Set([
+  "tools", "tool_choice", "parallel_tool_calls", "logit_bias", "logprobs",
+  "top_logprobs", "prediction", "response_format", "structured_outputs",
+  "include_reasoning", "web_search_options", "max_completion_tokens",
+]);
 
 // ---------- Raccourcis DOM ----------
 const $ = (sel) => document.querySelector(sel);
@@ -70,34 +140,15 @@ const el = {
   quickClose: $("#quick-close"),
   systemPrompt: $("#system-prompt"),
   webSearch: $("#web-search"),
-  tempRange: $("#temp-range"),
-  tempVal: $("#temp-val"),
-  maxTok: $("#maxtok"),
+  warnWeb: $("#warn-web"),
+  quickModelName: $("#quick-model-name"),
+  quickParams: $("#quick-params"),
   setDefaultBtn: $("#set-default-btn"),
   setDefaultOk: $("#set-default-ok"),
   defWebSearch: $("#def-web-search"),
   defTempRange: $("#def-temp-range"),
   defTempVal: $("#def-temp-val"),
   defMaxTok: $("#def-maxtok"),
-  advSection: $("#adv-section"),
-  advToggle: $("#adv-toggle"),
-  advTopp: $("#adv-topp"),
-  advToppVal: $("#adv-topp-val"),
-  advFreq: $("#adv-freq"),
-  advFreqVal: $("#adv-freq-val"),
-  advPres: $("#adv-pres"),
-  advPresVal: $("#adv-pres-val"),
-  advSeed: $("#adv-seed"),
-  advReasoning: $("#adv-reasoning"),
-  advStop: $("#adv-stop"),
-  warnWeb: $("#warn-web"),
-  warnTemp: $("#warn-temp"),
-  warnTopp: $("#warn-topp"),
-  warnFreq: $("#warn-freq"),
-  warnPres: $("#warn-pres"),
-  warnSeed: $("#warn-seed"),
-  warnReasoning: $("#warn-reasoning"),
-  warnStop: $("#warn-stop"),
   usageBtn: $("#usage-btn"),
   usageModal: $("#usage-modal"),
   usageClose: $("#usage-close"),
@@ -177,8 +228,6 @@ function installIcons() {
   if (dl) dl.innerHTML = svgIcon("download", 20);
   const chev = document.querySelector("#model-btn .chev");
   if (chev) chev.innerHTML = svgIcon("chevron", 15);
-  const advChev = document.querySelector("#adv-toggle .adv-chev");
-  if (advChev) advChev.innerHTML = svgIcon("chevron", 14);
 }
 
 // ---------- Lightbox ----------
@@ -532,10 +581,8 @@ async function openChat(id) {
     state.systemPrompt = data.systemPrompt || "";
     // Réglages de la discussion (sinon on retombe sur les défauts).
     state.settings = {
-      temperature: Number(data.settings?.temperature ?? state.defaults.temperature),
-      maxTokens: Number(data.settings?.maxTokens ?? state.defaults.maxTokens),
       webSearch: Boolean(data.settings?.webSearch ?? state.defaults.webSearch),
-      adv: sanitizeAdv(data.settings?.adv ?? state.defaults.adv),
+      params: sanitizeParams(data.settings?.params ?? state.defaults.params),
     };
     state.pending = [];
     renderAttachments();
@@ -855,7 +902,9 @@ function selectModel(id) {
   updateModelButton();
   updateFavToggle();
   renderTree();
-  refreshWarnings(); // avertissements mis à jour selon le nouveau modèle
+  refreshWarnings(); // avertissement recherche web
+  // Si la modale rapide est ouverte, on régénère ses contrôles pour le modèle.
+  if (!el.quickModal.hidden) renderQuickParams();
   closeModelPanel();
 }
 
@@ -868,11 +917,9 @@ async function loadPrefs() {
     state.recents = Array.isArray(p.recents) ? p.recents : [];
     if (p.defaults) {
       state.defaults = {
-        temperature: Number(p.defaults.temperature ?? 1),
-        maxTokens: Number(p.defaults.maxTokens ?? 0),
         systemPrompt: p.defaults.systemPrompt || "",
         webSearch: Boolean(p.defaults.webSearch),
-        adv: sanitizeAdv(p.defaults.adv),
+        params: sanitizeParams(p.defaults.params),
       };
     }
   } catch {
@@ -883,16 +930,15 @@ async function loadPrefs() {
   applyDefaultsToCurrent();
 }
 
-// Normalise un objet de réglages avancés (depuis prefs ou un chat).
-function sanitizeAdv(a) {
-  const out = newAdv();
-  if (a && typeof a === "object") {
-    if (typeof a.topP === "number") out.topP = a.topP;
-    if (typeof a.freqPenalty === "number") out.freqPenalty = a.freqPenalty;
-    if (typeof a.presPenalty === "number") out.presPenalty = a.presPenalty;
-    if (Number.isInteger(a.seed)) out.seed = a.seed;
-    if (["low", "medium", "high"].includes(a.reasoning)) out.reasoning = a.reasoning;
-    if (typeof a.stop === "string") out.stop = a.stop;
+// Normalise une map de paramètres (nom OpenRouter → valeur), depuis prefs/chat.
+// On ne garde que des valeurs simples (nombre / chaîne non vide).
+function sanitizeParams(p) {
+  const out = {};
+  if (p && typeof p === "object") {
+    for (const [k, v] of Object.entries(p)) {
+      if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+      else if (typeof v === "string" && v.trim() !== "") out[k] = v;
+    }
   }
   return out;
 }
@@ -900,12 +946,28 @@ function sanitizeAdv(a) {
 // Copie les réglages par défaut dans la discussion courante (nouvelle discussion).
 function applyDefaultsToCurrent() {
   state.settings = {
-    temperature: state.defaults.temperature,
-    maxTokens: state.defaults.maxTokens,
     webSearch: state.defaults.webSearch,
-    adv: sanitizeAdv(state.defaults.adv),
+    params: sanitizeParams(state.defaults.params),
   };
   state.systemPrompt = state.defaults.systemPrompt || "";
+}
+
+// Transforme la map {param: valeur} d'UI en objet envoyé à l'API.
+// Gère les cas particuliers : stop (chaîne → tableau), reasoning → reasoning_effort.
+function buildParamsPayload(params) {
+  const out = {};
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v == null || v === "") continue;
+    if (k === "stop") {
+      const arr = String(v).split(",").map((s) => s.trim()).filter(Boolean);
+      if (arr.length) out.stop = arr;
+    } else if (k === "reasoning") {
+      out.reasoning_effort = v; // le serveur mappe vers { reasoning: { effort } }
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 // Sauvegarde les réglages par défaut côté serveur.
@@ -1088,19 +1150,8 @@ async function streamAssistant(assistantMsg, assistantEl) {
       ? state.model + ":online"
       : state.model;
 
-  // Réglages avancés : on ne joint que ceux qui sont définis.
-  const adv = state.settings.adv || {};
-  const stopSeq = (adv.stop || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const advPayload = {};
-  if (adv.topP != null) advPayload.top_p = adv.topP;
-  if (adv.freqPenalty != null) advPayload.frequency_penalty = adv.freqPenalty;
-  if (adv.presPenalty != null) advPayload.presence_penalty = adv.presPenalty;
-  if (adv.seed != null) advPayload.seed = adv.seed;
-  if (adv.reasoning) advPayload.reasoning_effort = adv.reasoning;
-  if (stopSeq.length) advPayload.stop = stopSeq;
+  // Paramètres dynamiques : on transforme la map en payload API.
+  const params = buildParamsPayload(state.settings.params);
 
   try {
     const r = await fetch("/api/chat", {
@@ -1110,9 +1161,7 @@ async function streamAssistant(assistantMsg, assistantEl) {
         model: modelId,
         messages: buildApiMessages(),
         system: state.systemPrompt || undefined,
-        temperature: state.settings.temperature,
-        max_tokens: state.settings.maxTokens || undefined,
-        ...advPayload,
+        params,
         ...(wantsImage ? { modalities: ["image", "text"] } : {}),
       }),
       signal: state.abortController.signal,
@@ -1448,47 +1497,175 @@ function setWarn(warnEl, param, label) {
   }
 }
 
-// Rafraîchit tous les avertissements selon le modèle courant.
+// La recherche web est le seul réglage « spécial » (pas un paramètre API) :
+// on avertit s'il n'est pas supporté.
 function refreshWarnings() {
-  setWarn(el.warnTemp, "temperature", "la température");
   setWarn(el.warnWeb, "web_search_options", "la recherche internet");
-  setWarn(el.warnTopp, "top_p", "le Top P");
-  setWarn(el.warnFreq, "frequency_penalty", "le frequency penalty");
-  setWarn(el.warnPres, "presence_penalty", "le presence penalty");
-  setWarn(el.warnSeed, "seed", "le seed");
-  setWarn(el.warnReasoning, "reasoning", "l'effort de raisonnement");
-  setWarn(el.warnStop, "stop", "les séquences d'arrêt");
-  // (Les réglages « par défaut » ne dépendent pas du modèle courant :
-  // ils s'appliqueront à de futures discussions → pas d'avertissement là.)
+}
+
+// Liste ordonnée des paramètres à afficher pour le modèle courant :
+// on part de model.supported, on résout les alias, on retire les cachés.
+function paramsForModel() {
+  const cm = currentModel();
+  // Ordre d'affichage privilégié (les plus utiles d'abord).
+  const ORDER = [
+    "temperature", "max_tokens", "top_p", "reasoning", "verbosity", "seed",
+    "stop", "frequency_penalty", "presence_penalty", "repetition_penalty",
+    "top_k", "min_p", "top_a",
+  ];
+  let names;
+  if (cm && Array.isArray(cm.supported)) {
+    const seen = new Set();
+    names = [];
+    for (const raw of cm.supported) {
+      const p = PARAM_ALIASES[raw] || raw;
+      if (PARAM_HIDDEN.has(raw) || PARAM_HIDDEN.has(p)) continue;
+      if (seen.has(p)) continue;
+      seen.add(p);
+      names.push(p);
+    }
+  } else {
+    // Modèle sans info de capacités : on propose un jeu raisonnable.
+    names = ["temperature", "max_tokens", "top_p", "seed", "stop"];
+  }
+  // Tri : d'abord selon ORDER, puis le reste alphabétiquement.
+  names.sort((a, b) => {
+    const ia = ORDER.indexOf(a), ib = ORDER.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
+  return names;
+}
+
+// Construit le contrôle d'un paramètre et le branche sur state.settings.params.
+function makeParamControl(name) {
+  const spec = PARAM_SPECS[name] || {
+    label: name, type: "text",
+    hint: "Paramètre du modèle (valeur libre).",
+  };
+  const wrap = document.createElement("div");
+  wrap.className = "param-row";
+  const cur = state.settings.params[name];
+
+  const label = document.createElement("label");
+  label.className = "sp-label";
+  label.setAttribute("for", "p-" + name);
+  wrap.appendChild(label);
+
+  let input, valBadge;
+  const setLabel = (extra) => {
+    label.textContent = spec.label + (extra != null ? " : " : "");
+    if (extra != null) {
+      valBadge = document.createElement("span");
+      valBadge.className = "param-val";
+      valBadge.textContent = extra;
+      label.appendChild(valBadge);
+    }
+  };
+
+  if (spec.type === "range") {
+    setLabel(cur == null ? "auto" : Number(cur).toFixed(2));
+    input = document.createElement("input");
+    input.type = "range";
+    input.min = spec.min; input.max = spec.max; input.step = spec.step;
+    input.value = cur == null ? spec.autoAt ?? spec.default ?? spec.min : cur;
+    input.addEventListener("input", () => {
+      const v = Number(input.value);
+      const isAuto = spec.autoAt != null && v === spec.autoAt;
+      state.settings.params[name] = isAuto ? undefined : v;
+      valBadge.textContent = isAuto ? "auto" : v.toFixed(2);
+      paramChanged();
+    });
+  } else if (spec.type === "int") {
+    setLabel();
+    input = document.createElement("input");
+    input.type = "number";
+    if (spec.min != null) input.min = spec.min;
+    if (spec.step != null) input.step = spec.step;
+    input.value = cur == null ? "" : cur;
+    input.placeholder = name === "seed" ? "ex. 42" : "";
+    input.addEventListener("input", () => {
+      const raw = input.value.trim();
+      let v = raw === "" ? undefined : parseInt(raw, 10);
+      if (Number.isNaN(v)) v = undefined;
+      if (v === 0 && name === "max_tokens") v = undefined; // 0 = illimité
+      state.settings.params[name] = v;
+      paramChanged();
+    });
+  } else if (spec.type === "select") {
+    setLabel();
+    input = document.createElement("select");
+    for (const o of spec.options) {
+      const opt = document.createElement("option");
+      opt.value = o.value; opt.textContent = o.label;
+      input.appendChild(opt);
+    }
+    input.value = cur || "";
+    input.addEventListener("change", () => {
+      state.settings.params[name] = input.value || undefined;
+      paramChanged();
+    });
+  } else {
+    // texte (stop, ou paramètre inconnu générique)
+    setLabel();
+    input = document.createElement("input");
+    input.type = "text";
+    input.value = cur == null ? "" : cur;
+    input.placeholder = name === "stop" ? "ex. FIN, ###" : "valeur";
+    input.addEventListener("input", () => {
+      state.settings.params[name] = input.value.trim() || undefined;
+      paramChanged();
+    });
+  }
+  input.id = "p-" + name;
+  wrap.appendChild(input);
+
+  if (spec.hint) {
+    const hint = document.createElement("div");
+    hint.className = "sp-hint";
+    hint.textContent = spec.hint;
+    wrap.appendChild(hint);
+  }
+  return wrap;
+}
+
+function paramChanged() {
+  if (state.chatId) persist();
+}
+
+// (Re)génère la modale rapide : recherche web + paramètres du modèle courant.
+function renderQuickParams() {
+  const cm = currentModel();
+  el.quickModelName.textContent = cm ? cm.name || cm.id : "";
+  el.quickParams.innerHTML = "";
+  const names = paramsForModel();
+  if (!names.length) {
+    const empty = document.createElement("div");
+    empty.className = "sp-hint";
+    empty.textContent = "Aucun réglage exposé pour ce modèle.";
+    el.quickParams.appendChild(empty);
+    return;
+  }
+  for (const name of names) {
+    el.quickParams.appendChild(makeParamControl(name));
+  }
 }
 
 // ---------- Modales réglages (générale + rapide) ----------
 // Synchronise les champs des deux modales avec l'état courant.
 function syncSettingsUI() {
-  // Réglages de la discussion courante (modale rapide).
   el.systemPrompt.value = state.systemPrompt || "";
-  el.tempRange.value = state.settings.temperature;
-  el.tempVal.textContent = Number(state.settings.temperature).toFixed(1);
-  el.maxTok.value = state.settings.maxTokens || 0;
   el.webSearch.checked = Boolean(state.settings.webSearch);
-  // Réglages avancés (discussion courante).
-  const a = state.settings.adv || newAdv();
-  el.advTopp.value = a.topP == null ? 1 : a.topP;
-  el.advToppVal.textContent = a.topP == null ? "auto" : a.topP.toFixed(2);
-  el.advFreq.value = a.freqPenalty == null ? 0 : a.freqPenalty;
-  el.advFreqVal.textContent = (a.freqPenalty == null ? 0 : a.freqPenalty).toFixed(1);
-  el.advPres.value = a.presPenalty == null ? 0 : a.presPenalty;
-  el.advPresVal.textContent = (a.presPenalty == null ? 0 : a.presPenalty).toFixed(1);
-  el.advSeed.value = a.seed == null ? "" : a.seed;
-  el.advReasoning.value = a.reasoning || "";
-  el.advStop.value = a.stop || "";
-  // Réglages par défaut (modale générale).
+  // Réglages par défaut (modale générale) : temp, longueur, web.
   el.defWebSearch.checked = Boolean(state.defaults.webSearch);
-  el.defTempRange.value = state.defaults.temperature;
-  el.defTempVal.textContent = Number(state.defaults.temperature).toFixed(1);
-  el.defMaxTok.value = state.defaults.maxTokens || 0;
-  // Avertissements selon les capacités du modèle courant.
+  const dp = state.defaults.params || {};
+  el.defTempRange.value = dp.temperature == null ? 1 : dp.temperature;
+  el.defTempVal.textContent = Number(dp.temperature == null ? 1 : dp.temperature).toFixed(1);
+  el.defMaxTok.value = dp.max_tokens || 0;
   refreshWarnings();
+  renderQuickParams(); // reconstruit les contrôles dynamiques
 }
 
 // ⚙ HAUT : instructions système + réglages par défaut.
@@ -1524,66 +1701,17 @@ el.quickModal.addEventListener("click", (e) => {
   if (e.target === el.quickModal) closeQuick();
 });
 
-// --- Champs (persistés avec la discussion) ---
+// --- Prompt système + recherche web (les paramètres dynamiques gèrent leurs
+//     propres événements dans makeParamControl). ---
 el.systemPrompt.addEventListener("input", () => {
   state.systemPrompt = el.systemPrompt.value;
   updateSettingsIndicators();
-  if (state.chatId) persist();
-});
-el.tempRange.addEventListener("input", () => {
-  state.settings.temperature = Number(el.tempRange.value);
-  el.tempVal.textContent = state.settings.temperature.toFixed(1);
-  if (state.chatId) persist();
-});
-el.maxTok.addEventListener("input", () => {
-  state.settings.maxTokens = Math.max(0, Number(el.maxTok.value) || 0);
   if (state.chatId) persist();
 });
 el.webSearch.addEventListener("change", () => {
   state.settings.webSearch = el.webSearch.checked;
   el.settingsBtnBottom.classList.toggle("has-web", el.webSearch.checked);
   if (state.chatId) persist();
-});
-
-// --- Section « Avancé » (repliable) + ses champs ---
-el.advToggle.addEventListener("click", () => {
-  el.advSection.classList.toggle("collapsed");
-});
-function advChanged() {
-  if (state.chatId) persist();
-}
-el.advTopp.addEventListener("input", () => {
-  const v = Number(el.advTopp.value);
-  // 1 (max) = "auto" (on n'envoie pas top_p) ; en dessous on l'active.
-  state.settings.adv.topP = v >= 1 ? null : v;
-  el.advToppVal.textContent = v >= 1 ? "auto" : v.toFixed(2);
-  advChanged();
-});
-el.advFreq.addEventListener("input", () => {
-  const v = Number(el.advFreq.value);
-  state.settings.adv.freqPenalty = v === 0 ? null : v;
-  el.advFreqVal.textContent = v.toFixed(1);
-  advChanged();
-});
-el.advPres.addEventListener("input", () => {
-  const v = Number(el.advPres.value);
-  state.settings.adv.presPenalty = v === 0 ? null : v;
-  el.advPresVal.textContent = v.toFixed(1);
-  advChanged();
-});
-el.advSeed.addEventListener("input", () => {
-  const v = el.advSeed.value.trim();
-  state.settings.adv.seed = v === "" ? null : parseInt(v, 10);
-  if (Number.isNaN(state.settings.adv.seed)) state.settings.adv.seed = null;
-  advChanged();
-});
-el.advReasoning.addEventListener("change", () => {
-  state.settings.adv.reasoning = el.advReasoning.value;
-  advChanged();
-});
-el.advStop.addEventListener("input", () => {
-  state.settings.adv.stop = el.advStop.value;
-  advChanged();
 });
 
 // --- Champs des RÉGLAGES PAR DÉFAUT (édités directement, sauvés côté serveur) ---
@@ -1598,26 +1726,29 @@ el.defWebSearch.addEventListener("change", () => {
   flashDefaultOk();
 });
 el.defTempRange.addEventListener("input", () => {
-  state.defaults.temperature = Number(el.defTempRange.value);
-  el.defTempVal.textContent = state.defaults.temperature.toFixed(1);
+  state.defaults.params = state.defaults.params || {};
+  const v = Number(el.defTempRange.value);
+  state.defaults.params.temperature = v; // toujours défini (défaut explicite)
+  el.defTempVal.textContent = v.toFixed(1);
   saveDefaults();
 });
 el.defMaxTok.addEventListener("input", () => {
-  state.defaults.maxTokens = Math.max(0, Number(el.defMaxTok.value) || 0);
+  state.defaults.params = state.defaults.params || {};
+  const v = Math.max(0, Number(el.defMaxTok.value) || 0);
+  if (v === 0) delete state.defaults.params.max_tokens;
+  else state.defaults.params.max_tokens = v;
   saveDefaults();
 });
 
-// « Copier les réglages de cette discussion comme défaut » : reprend température,
-// longueur, recherche web et prompt système de la discussion courante.
+// « Copier les réglages de cette discussion comme défaut » : reprend les
+// paramètres, la recherche web et le prompt système de la discussion courante.
 el.setDefaultBtn.addEventListener("click", async () => {
   state.defaults = {
-    temperature: state.settings.temperature,
-    maxTokens: state.settings.maxTokens,
     systemPrompt: state.systemPrompt || "",
     webSearch: Boolean(state.settings.webSearch),
-    adv: sanitizeAdv(state.settings.adv),
+    params: sanitizeParams(state.settings.params),
   };
-  syncSettingsUI(); // met à jour les champs des défauts affichés
+  syncSettingsUI();
   await saveDefaults();
   flashDefaultOk();
 });
