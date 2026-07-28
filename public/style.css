@@ -1102,3 +1102,48 @@ input:focus, textarea:focus, select:focus {
   padding: 0 2px;
 }
 #quote-preview .qp-close:hover { color: var(--danger); }
+
+/* ---------- Section « Avancé » repliable (modale rapide) ---------- */
+#adv-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+#adv-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+#adv-toggle:hover { color: var(--accent); }
+#adv-toggle .adv-chev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  transition: transform 0.18s ease;
+}
+#adv-toggle .adv-chev svg { width: 14px; height: 14px; }
+#adv-section.collapsed #adv-toggle .adv-chev { transform: rotate(-90deg); }
+#adv-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+#adv-section.collapsed #adv-body { display: none; }
+#adv-body select, #adv-body input[type="text"], #adv-body input[type="number"] {
+  width: 100%;
+  border-radius: var(--radius-sm);
+}

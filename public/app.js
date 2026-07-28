@@ -15,12 +15,24 @@ const state = {
   expanded: {},        // groupes explicitement ouverts : { "prov:OpenAI": true }
   // Réglages par défaut (côté serveur, prefs.json) : appliqués aux NOUVELLES
   // discussions. Modifiables et surchargeables au cas par cas.
-  defaults: { temperature: 1, maxTokens: 0, systemPrompt: "", webSearch: false },
+  defaults: { temperature: 1, maxTokens: 0, systemPrompt: "", webSearch: false, adv: newAdv() },
   // Réglages de la discussion COURANTE (seed depuis defaults, persistés avec le chat).
   systemPrompt: "",
-  settings: { temperature: 1, maxTokens: 0, webSearch: false },
+  settings: { temperature: 1, maxTokens: 0, webSearch: false, adv: newAdv() },
   quote: null,         // passage cité en attente (quote-reply)
 };
+
+// Réglages avancés vides (valeurs "non définies" = on n'envoie pas le paramètre).
+function newAdv() {
+  return {
+    topP: null,        // 0..1
+    freqPenalty: null, // -2..2
+    presPenalty: null, // -2..2
+    seed: null,        // entier
+    reasoning: "",     // "" | "low" | "medium" | "high"
+    stop: "",          // séquences séparées par des virgules
+  };
+}
 
 // ---------- Raccourcis DOM ----------
 const $ = (sel) => document.querySelector(sel);
@@ -67,6 +79,17 @@ const el = {
   defTempRange: $("#def-temp-range"),
   defTempVal: $("#def-temp-val"),
   defMaxTok: $("#def-maxtok"),
+  advSection: $("#adv-section"),
+  advToggle: $("#adv-toggle"),
+  advTopp: $("#adv-topp"),
+  advToppVal: $("#adv-topp-val"),
+  advFreq: $("#adv-freq"),
+  advFreqVal: $("#adv-freq-val"),
+  advPres: $("#adv-pres"),
+  advPresVal: $("#adv-pres-val"),
+  advSeed: $("#adv-seed"),
+  advReasoning: $("#adv-reasoning"),
+  advStop: $("#adv-stop"),
   usageBtn: $("#usage-btn"),
   usageModal: $("#usage-modal"),
   usageClose: $("#usage-close"),
@@ -146,6 +169,8 @@ function installIcons() {
   if (dl) dl.innerHTML = svgIcon("download", 20);
   const chev = document.querySelector("#model-btn .chev");
   if (chev) chev.innerHTML = svgIcon("chevron", 15);
+  const advChev = document.querySelector("#adv-toggle .adv-chev");
+  if (advChev) advChev.innerHTML = svgIcon("chevron", 14);
 }
 
 // ---------- Lightbox ----------
@@ -502,6 +527,7 @@ async function openChat(id) {
       temperature: Number(data.settings?.temperature ?? state.defaults.temperature),
       maxTokens: Number(data.settings?.maxTokens ?? state.defaults.maxTokens),
       webSearch: Boolean(data.settings?.webSearch ?? state.defaults.webSearch),
+      adv: sanitizeAdv(data.settings?.adv ?? state.defaults.adv),
     };
     state.pending = [];
     renderAttachments();
@@ -837,6 +863,7 @@ async function loadPrefs() {
         maxTokens: Number(p.defaults.maxTokens ?? 0),
         systemPrompt: p.defaults.systemPrompt || "",
         webSearch: Boolean(p.defaults.webSearch),
+        adv: sanitizeAdv(p.defaults.adv),
       };
     }
   } catch {
@@ -847,12 +874,27 @@ async function loadPrefs() {
   applyDefaultsToCurrent();
 }
 
+// Normalise un objet de réglages avancés (depuis prefs ou un chat).
+function sanitizeAdv(a) {
+  const out = newAdv();
+  if (a && typeof a === "object") {
+    if (typeof a.topP === "number") out.topP = a.topP;
+    if (typeof a.freqPenalty === "number") out.freqPenalty = a.freqPenalty;
+    if (typeof a.presPenalty === "number") out.presPenalty = a.presPenalty;
+    if (Number.isInteger(a.seed)) out.seed = a.seed;
+    if (["low", "medium", "high"].includes(a.reasoning)) out.reasoning = a.reasoning;
+    if (typeof a.stop === "string") out.stop = a.stop;
+  }
+  return out;
+}
+
 // Copie les réglages par défaut dans la discussion courante (nouvelle discussion).
 function applyDefaultsToCurrent() {
   state.settings = {
     temperature: state.defaults.temperature,
     maxTokens: state.defaults.maxTokens,
     webSearch: state.defaults.webSearch,
+    adv: sanitizeAdv(state.defaults.adv),
   };
   state.systemPrompt = state.defaults.systemPrompt || "";
 }
@@ -1037,6 +1079,20 @@ async function streamAssistant(assistantMsg, assistantEl) {
       ? state.model + ":online"
       : state.model;
 
+  // Réglages avancés : on ne joint que ceux qui sont définis.
+  const adv = state.settings.adv || {};
+  const stopSeq = (adv.stop || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const advPayload = {};
+  if (adv.topP != null) advPayload.top_p = adv.topP;
+  if (adv.freqPenalty != null) advPayload.frequency_penalty = adv.freqPenalty;
+  if (adv.presPenalty != null) advPayload.presence_penalty = adv.presPenalty;
+  if (adv.seed != null) advPayload.seed = adv.seed;
+  if (adv.reasoning) advPayload.reasoning_effort = adv.reasoning;
+  if (stopSeq.length) advPayload.stop = stopSeq;
+
   try {
     const r = await fetch("/api/chat", {
       method: "POST",
@@ -1047,6 +1103,7 @@ async function streamAssistant(assistantMsg, assistantEl) {
         system: state.systemPrompt || undefined,
         temperature: state.settings.temperature,
         max_tokens: state.settings.maxTokens || undefined,
+        ...advPayload,
         ...(wantsImage ? { modalities: ["image", "text"] } : {}),
       }),
       signal: state.abortController.signal,
@@ -1369,6 +1426,17 @@ function syncSettingsUI() {
   el.tempVal.textContent = Number(state.settings.temperature).toFixed(1);
   el.maxTok.value = state.settings.maxTokens || 0;
   el.webSearch.checked = Boolean(state.settings.webSearch);
+  // Réglages avancés (discussion courante).
+  const a = state.settings.adv || newAdv();
+  el.advTopp.value = a.topP == null ? 1 : a.topP;
+  el.advToppVal.textContent = a.topP == null ? "auto" : a.topP.toFixed(2);
+  el.advFreq.value = a.freqPenalty == null ? 0 : a.freqPenalty;
+  el.advFreqVal.textContent = (a.freqPenalty == null ? 0 : a.freqPenalty).toFixed(1);
+  el.advPres.value = a.presPenalty == null ? 0 : a.presPenalty;
+  el.advPresVal.textContent = (a.presPenalty == null ? 0 : a.presPenalty).toFixed(1);
+  el.advSeed.value = a.seed == null ? "" : a.seed;
+  el.advReasoning.value = a.reasoning || "";
+  el.advStop.value = a.stop || "";
   // Réglages par défaut (modale générale).
   el.defWebSearch.checked = Boolean(state.defaults.webSearch);
   el.defTempRange.value = state.defaults.temperature;
@@ -1430,6 +1498,47 @@ el.webSearch.addEventListener("change", () => {
   if (state.chatId) persist();
 });
 
+// --- Section « Avancé » (repliable) + ses champs ---
+el.advToggle.addEventListener("click", () => {
+  el.advSection.classList.toggle("collapsed");
+});
+function advChanged() {
+  if (state.chatId) persist();
+}
+el.advTopp.addEventListener("input", () => {
+  const v = Number(el.advTopp.value);
+  // 1 (max) = "auto" (on n'envoie pas top_p) ; en dessous on l'active.
+  state.settings.adv.topP = v >= 1 ? null : v;
+  el.advToppVal.textContent = v >= 1 ? "auto" : v.toFixed(2);
+  advChanged();
+});
+el.advFreq.addEventListener("input", () => {
+  const v = Number(el.advFreq.value);
+  state.settings.adv.freqPenalty = v === 0 ? null : v;
+  el.advFreqVal.textContent = v.toFixed(1);
+  advChanged();
+});
+el.advPres.addEventListener("input", () => {
+  const v = Number(el.advPres.value);
+  state.settings.adv.presPenalty = v === 0 ? null : v;
+  el.advPresVal.textContent = v.toFixed(1);
+  advChanged();
+});
+el.advSeed.addEventListener("input", () => {
+  const v = el.advSeed.value.trim();
+  state.settings.adv.seed = v === "" ? null : parseInt(v, 10);
+  if (Number.isNaN(state.settings.adv.seed)) state.settings.adv.seed = null;
+  advChanged();
+});
+el.advReasoning.addEventListener("change", () => {
+  state.settings.adv.reasoning = el.advReasoning.value;
+  advChanged();
+});
+el.advStop.addEventListener("input", () => {
+  state.settings.adv.stop = el.advStop.value;
+  advChanged();
+});
+
 // --- Champs des RÉGLAGES PAR DÉFAUT (édités directement, sauvés côté serveur) ---
 function flashDefaultOk() {
   el.setDefaultOk.hidden = false;
@@ -1459,6 +1568,7 @@ el.setDefaultBtn.addEventListener("click", async () => {
     maxTokens: state.settings.maxTokens,
     systemPrompt: state.systemPrompt || "",
     webSearch: Boolean(state.settings.webSearch),
+    adv: sanitizeAdv(state.settings.adv),
   };
   syncSettingsUI(); // met à jour les champs des défauts affichés
   await saveDefaults();

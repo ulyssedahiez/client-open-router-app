@@ -158,6 +158,48 @@
 
         <label class="sp-label" for="maxtok">Longueur max (tokens, 0 = illimité)</label>
         <input id="maxtok" type="number" min="0" step="128" value="0" />
+
+        <!-- Section Avancé (repliable) -->
+        <div id="adv-section" class="collapsed">
+          <button id="adv-toggle" type="button">
+            <span class="adv-chev"></span>
+            <span>Réglages avancés</span>
+          </button>
+          <div id="adv-body">
+            <label class="sp-label" for="adv-topp">
+              Top P : <span id="adv-topp-val">auto</span>
+            </label>
+            <input id="adv-topp" type="range" min="0" max="1" step="0.05" value="1" />
+            <div class="sp-hint">Alternative à la température (0.1–1). « auto » = non envoyé.</div>
+
+            <label class="sp-label" for="adv-freq">
+              Frequency penalty : <span id="adv-freq-val">0</span>
+            </label>
+            <input id="adv-freq" type="range" min="-2" max="2" step="0.1" value="0" />
+            <div class="sp-hint">Positif = moins de répétitions de mots.</div>
+
+            <label class="sp-label" for="adv-pres">
+              Presence penalty : <span id="adv-pres-val">0</span>
+            </label>
+            <input id="adv-pres" type="range" min="-2" max="2" step="0.1" value="0" />
+            <div class="sp-hint">Positif = pousse à aborder de nouveaux sujets.</div>
+
+            <label class="sp-label" for="adv-seed">Seed (reproductibilité, vide = aléatoire)</label>
+            <input id="adv-seed" type="number" step="1" placeholder="ex. 42" />
+
+            <label class="sp-label" for="adv-reasoning">Effort de raisonnement</label>
+            <select id="adv-reasoning">
+              <option value="">Auto (défaut du modèle)</option>
+              <option value="low">Faible (rapide)</option>
+              <option value="medium">Moyen</option>
+              <option value="high">Élevé (plus poussé)</option>
+            </select>
+            <div class="sp-hint">Pour les modèles à raisonnement (GPT-5, o-series, Claude thinking).</div>
+
+            <label class="sp-label" for="adv-stop">Séquences d'arrêt (séparées par des virgules)</label>
+            <input id="adv-stop" type="text" placeholder="ex. FIN, ###" />
+          </div>
+        </div>
       </div>
     </div>
   </div>

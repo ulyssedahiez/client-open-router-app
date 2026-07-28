@@ -196,6 +196,8 @@ function sanitizeDefaults(d) {
     if (typeof d.systemPrompt === "string")
       out.systemPrompt = d.systemPrompt.slice(0, 8000);
     out.webSearch = Boolean(d.webSearch);
+    // Réglages avancés : on stocke tel quel (objet simple) s'il est fourni.
+    if (d.adv && typeof d.adv === "object") out.adv = d.adv;
   }
   return out;
 }
@@ -353,7 +355,20 @@ async function chat(req, res) {
     return sendJSON(res, 400, { error: String(e.message || e) });
   }
 
-  const { model, messages, modalities, system, temperature, max_tokens } = body;
+  const {
+    model,
+    messages,
+    modalities,
+    system,
+    temperature,
+    max_tokens,
+    top_p,
+    frequency_penalty,
+    presence_penalty,
+    seed,
+    reasoning_effort,
+    stop,
+  } = body;
   if (!model || !Array.isArray(messages) || messages.length === 0) {
     return sendJSON(res, 400, { error: "model et messages requis" });
   }
@@ -391,6 +406,34 @@ async function chat(req, res) {
   }
   if (typeof max_tokens === "number" && max_tokens > 0) {
     payload.max_tokens = Math.floor(max_tokens);
+  }
+  // --- Réglages avancés ---
+  if (typeof top_p === "number" && top_p > 0 && top_p <= 1) {
+    payload.top_p = top_p;
+  }
+  if (
+    typeof frequency_penalty === "number" &&
+    frequency_penalty >= -2 &&
+    frequency_penalty <= 2
+  ) {
+    payload.frequency_penalty = frequency_penalty;
+  }
+  if (
+    typeof presence_penalty === "number" &&
+    presence_penalty >= -2 &&
+    presence_penalty <= 2
+  ) {
+    payload.presence_penalty = presence_penalty;
+  }
+  if (Number.isInteger(seed)) {
+    payload.seed = seed;
+  }
+  if (["low", "medium", "high"].includes(reasoning_effort)) {
+    // Format OpenRouter : { reasoning: { effort } }
+    payload.reasoning = { effort: reasoning_effort };
+  }
+  if (Array.isArray(stop) && stop.length) {
+    payload.stop = stop.filter((s) => typeof s === "string" && s).slice(0, 4);
   }
   // Demande le décompte de tokens + coût dans le flux (dernier chunk).
   payload.usage = { include: true };
