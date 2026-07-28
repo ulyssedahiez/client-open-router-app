@@ -19,6 +19,7 @@ const state = {
   // Réglages de la discussion COURANTE (seed depuis defaults, persistés avec le chat).
   systemPrompt: "",
   settings: { temperature: 1, maxTokens: 0, webSearch: false },
+  quote: null,         // passage cité en attente (quote-reply)
 };
 
 // ---------- Raccourcis DOM ----------
@@ -66,6 +67,9 @@ const el = {
   usageModal: $("#usage-modal"),
   usageClose: $("#usage-close"),
   usageBody: $("#usage-body"),
+  quoteReply: $("#quote-reply"),
+  quotePreview: $("#quote-preview"),
+  messagesEl: $("#messages"),
 };
 
 // ---------- Icônes (SVG ligne, style épuré) ----------
@@ -528,10 +532,23 @@ function newChat() {
 }
 
 // Met à jour le hash de l'URL avec l'id de discussion (sans recharger la page).
+// État de modale reflété dans l'URL (?m=settings|quick|usage).
+let urlModal = null;
 function setUrlChat(id) {
-  const target = id ? "#" + id : "#";
-  if (location.hash !== target) {
-    history.replaceState(null, "", id ? "#" + id : location.pathname);
+  urlChatId = id || null;
+  writeUrl();
+}
+function setUrlModal(name) {
+  urlModal = name || null;
+  writeUrl();
+}
+let urlChatId = null;
+function writeUrl() {
+  const q = urlModal ? "?m=" + urlModal : "";
+  const h = urlChatId ? "#" + urlChatId : "";
+  const target = location.pathname + q + h;
+  if (location.pathname + location.search + location.hash !== target) {
+    history.replaceState(null, "", target || location.pathname);
   }
 }
 
@@ -1104,18 +1121,28 @@ async function streamAssistant(assistantMsg, assistantEl) {
 }
 
 async function sendMessage() {
-  const text = el.input.value.trim();
+  let text = el.input.value.trim();
   const atts = state.pending.slice();
-  if ((!text && atts.length === 0) || state.streaming) return;
+  if ((!text && atts.length === 0 && !state.quote) || state.streaming) return;
   if (!state.model) {
     setStatus("⚠️ choisis un modèle d'abord");
     return;
+  }
+
+  // Citation (quote-reply) : préfixe le message d'un blockquote markdown.
+  if (state.quote) {
+    const quoted = state.quote
+      .split("\n")
+      .map((l) => "> " + l)
+      .join("\n");
+    text = quoted + "\n\n" + text;
   }
 
   const userMsg = { role: "user", content: text, attachments: atts };
   state.messages.push(userMsg);
   el.input.value = "";
   state.pending = [];
+  clearQuote();
   renderAttachments();
   autoGrow();
   if (el.messages.querySelector(".empty-state")) el.messages.innerHTML = "";
@@ -1324,7 +1351,7 @@ document.addEventListener("keydown", (e) => {
   if (!el.lightbox.hidden) closeLightbox();
   else if (!el.settingsModal.hidden) closeSettings();
   else if (!el.quickModal.hidden) closeQuick();
-  else if (!el.usageModal.hidden) el.usageModal.hidden = true;
+  else if (!el.usageModal.hidden) closeUsage();
 });
 
 // ---------- Modales réglages (générale + rapide) ----------
@@ -1342,9 +1369,11 @@ function openSettings() {
   syncSettingsUI();
   el.setDefaultOk.hidden = true;
   el.settingsModal.hidden = false;
+  setUrlModal("settings");
 }
 function closeSettings() {
   el.settingsModal.hidden = true;
+  if (urlModal === "settings") setUrlModal(null);
 }
 el.settingsBtn.addEventListener("click", openSettings);
 el.settingsClose.addEventListener("click", closeSettings);
@@ -1356,9 +1385,11 @@ el.settingsModal.addEventListener("click", (e) => {
 function openQuick() {
   syncSettingsUI();
   el.quickModal.hidden = false;
+  setUrlModal("quick");
 }
 function closeQuick() {
   el.quickModal.hidden = true;
+  if (urlModal === "quick") setUrlModal(null);
 }
 el.settingsBtnBottom.addEventListener("click", openQuick);
 el.quickClose.addEventListener("click", closeQuick);
@@ -1401,14 +1432,19 @@ el.setDefaultBtn.addEventListener("click", async () => {
 });
 
 // ---------- Modale bilan de consommation ----------
-el.usageBtn.addEventListener("click", openUsage);
-el.usageClose.addEventListener("click", () => (el.usageModal.hidden = true));
+function closeUsage() {
+  el.usageModal.hidden = true;
+  if (urlModal === "usage") setUrlModal(null);
+}
+el.usageBtn.addEventListener("click", () => openUsage());
+el.usageClose.addEventListener("click", closeUsage);
 el.usageModal.addEventListener("click", (e) => {
-  if (e.target === el.usageModal) el.usageModal.hidden = true;
+  if (e.target === el.usageModal) closeUsage();
 });
 
 async function openUsage() {
   el.usageModal.hidden = false;
+  setUrlModal("usage");
   el.usageBody.innerHTML = '<div class="muted">Chargement…</div>';
   try {
     const r = await fetch("/api/usage");
@@ -1453,6 +1489,57 @@ function renderUsage(u) {
   }
   el.usageBody.innerHTML = html;
 }
+
+// ---------- Répondre à une sélection (quote-reply) ----------
+// Affiche le bouton flottant « Répondre » quand on sélectionne du texte
+// à l'intérieur d'un message.
+function onSelectionChange() {
+  const sel = window.getSelection();
+  const text = sel ? sel.toString().trim() : "";
+  if (!text || text.length < 2) {
+    el.quoteReply.hidden = true;
+    return;
+  }
+  // La sélection doit être dans la zone des messages.
+  const anchor = sel.anchorNode;
+  if (!anchor || !el.messagesEl.contains(anchor.nodeType === 1 ? anchor : anchor.parentNode)) {
+    el.quoteReply.hidden = true;
+    return;
+  }
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.height === 0)) {
+    el.quoteReply.hidden = true;
+    return;
+  }
+  el.quoteReply.style.left = rect.left + rect.width / 2 + "px";
+  el.quoteReply.style.top = rect.top - 8 + "px";
+  el.quoteReply.hidden = false;
+}
+document.addEventListener("selectionchange", onSelectionChange);
+// On masque le bouton quand on scrolle la zone messages.
+el.messagesEl.addEventListener("scroll", () => (el.quoteReply.hidden = true));
+
+el.quoteReply.addEventListener("mousedown", (e) => {
+  // mousedown (pas click) pour agir avant que la sélection ne disparaisse.
+  e.preventDefault();
+  const text = window.getSelection().toString().trim();
+  if (text) setQuote(text);
+  el.quoteReply.hidden = true;
+  window.getSelection().removeAllRanges();
+});
+
+function setQuote(text) {
+  state.quote = text;
+  const preview = el.quotePreview.querySelector(".qp-text");
+  preview.textContent = text;
+  el.quotePreview.hidden = false;
+  el.input.focus();
+}
+function clearQuote() {
+  state.quote = null;
+  el.quotePreview.hidden = true;
+}
+el.quotePreview.querySelector(".qp-close").addEventListener("click", clearQuote);
 
 // Pièces jointes : bouton, drag & drop, coller.
 el.attachBtn.addEventListener("click", () => el.fileInput.click());
@@ -1588,9 +1675,19 @@ function showNoKeyBanner() {
   await loadModels();
   await loadChatList();
 
-  // Rouvre la discussion indiquée dans l'URL (#id) après un refresh.
+  // Lit l'état d'URL AVANT toute écriture (sinon openChat écraserait ?m=).
   const idFromUrl = location.hash.slice(1);
+  const m = new URLSearchParams(location.search).get("m");
+  urlChatId = idFromUrl || null;
+  urlModal = m || null;
+
+  // Rouvre la discussion indiquée dans l'URL (#id) après un refresh.
   if (idFromUrl) await openChat(idFromUrl);
+
+  // Rouvre la modale indiquée dans l'URL (?m=settings|quick|usage).
+  if (m === "settings") openSettings();
+  else if (m === "quick") openQuick();
+  else if (m === "usage") openUsage();
 
   el.input.focus();
 })();

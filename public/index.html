@@ -60,6 +60,11 @@
       <section id="messages"></section>
 
       <footer id="composer">
+        <!-- Aperçu du passage cité (quote-reply) -->
+        <div id="quote-preview" hidden>
+          <span class="qp-text"></span>
+          <button class="qp-close" title="Retirer la citation">×</button>
+        </div>
         <!-- Aperçu des pièces jointes en attente -->
         <div id="attachments" hidden></div>
         <div class="composer-row">
@@ -79,6 +84,9 @@
       </footer>
     </main>
   </div>
+
+  <!-- Bouton flottant « Répondre » sur sélection de texte -->
+  <button id="quote-reply" hidden>Répondre</button>
 
   <!-- Lightbox : agrandissement d'une image -->
   <div id="lightbox" hidden>
