@@ -1,0 +1,12 @@
+{
+  "name": "client-openrouter",
+  "version": "1.0.0",
+  "description": "Petit client OpenRouter local pour discuter avec des modèles",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

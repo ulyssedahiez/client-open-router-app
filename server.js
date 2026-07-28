@@ -1,0 +1,427 @@
+import { createServer } from "node:http";
+import { readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve, extname } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CHATS_DIR = join(__dirname, "chats");
+const PUBLIC_DIR = join(__dirname, "public");
+const DATA_DIR = join(__dirname, "data");
+const PREFS_PATH = join(DATA_DIR, "prefs.json");
+
+// --- Chargement minimal du .env (pas de dépendance externe) ---
+function loadEnv() {
+  const envPath = join(__dirname, ".env");
+  if (!existsSync(envPath)) return;
+  const content = readFileSync(envPath, "utf8");
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq === -1) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+loadEnv();
+
+const API_KEY = process.env.OPENROUTER_API_KEY;
+const PORT = Number(process.env.PORT) || 5178;
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MODELS_URL = "https://openrouter.ai/api/v1/models";
+
+if (!API_KEY) {
+  console.error(
+    "\n⚠️  Aucune clé trouvée.\n" +
+      "   Crée un fichier .env avec :  OPENROUTER_API_KEY=sk-or-...\n" +
+      "   (tu peux copier .env.example)\n"
+  );
+}
+
+// --- Helpers ---
+function sendJSON(res, status, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > 20 * 1024 * 1024) {
+        reject(new Error("Corps de requête trop volumineux"));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new Error("JSON invalide"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+// Un id de chat sûr : uniquement caractères simples, pas de traversée de dossier.
+function safeChatId(id) {
+  if (typeof id !== "string") return null;
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id)) return null;
+  return id;
+}
+
+function chatPath(id) {
+  return join(CHATS_DIR, `${id}.json`);
+}
+
+async function ensureChatsDir() {
+  await mkdir(CHATS_DIR, { recursive: true });
+}
+
+// --- Handlers API ---
+
+// GET /api/chats  -> liste des discussions (métadonnées seulement)
+async function listChats(res) {
+  await ensureChatsDir();
+  const files = (await readdir(CHATS_DIR)).filter((f) => f.endsWith(".json"));
+  const chats = [];
+  for (const f of files) {
+    try {
+      const data = JSON.parse(await readFile(join(CHATS_DIR, f), "utf8"));
+      chats.push({
+        id: data.id,
+        title: data.title || "Sans titre",
+        model: data.model || null,
+        updatedAt: data.updatedAt || 0,
+        messageCount: Array.isArray(data.messages) ? data.messages.length : 0,
+      });
+    } catch {
+      // fichier illisible : on l'ignore silencieusement
+    }
+  }
+  chats.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  sendJSON(res, 200, { chats });
+}
+
+// GET /api/chats/:id -> une discussion complète
+async function getChat(res, id) {
+  const safe = safeChatId(id);
+  if (!safe) return sendJSON(res, 400, { error: "id invalide" });
+  const p = chatPath(safe);
+  if (!existsSync(p)) return sendJSON(res, 404, { error: "introuvable" });
+  try {
+    const data = JSON.parse(await readFile(p, "utf8"));
+    sendJSON(res, 200, data);
+  } catch {
+    sendJSON(res, 500, { error: "lecture impossible" });
+  }
+}
+
+// PUT /api/chats/:id -> sauvegarde (écrase) une discussion
+async function saveChat(req, res, id) {
+  const safe = safeChatId(id);
+  if (!safe) return sendJSON(res, 400, { error: "id invalide" });
+  const body = await readBody(req);
+  if (!Array.isArray(body.messages)) {
+    return sendJSON(res, 400, { error: "messages manquants" });
+  }
+  await ensureChatsDir();
+  const data = {
+    id: safe,
+    title: typeof body.title === "string" ? body.title.slice(0, 200) : "Sans titre",
+    model: typeof body.model === "string" ? body.model : null,
+    messages: body.messages,
+    createdAt: body.createdAt || Date.now(),
+    updatedAt: Date.now(),
+  };
+  await writeFile(chatPath(safe), JSON.stringify(data, null, 2), "utf8");
+  sendJSON(res, 200, { ok: true, updatedAt: data.updatedAt });
+}
+
+// DELETE /api/chats/:id
+async function deleteChat(res, id) {
+  const safe = safeChatId(id);
+  if (!safe) return sendJSON(res, 400, { error: "id invalide" });
+  const p = chatPath(safe);
+  if (existsSync(p)) await unlink(p);
+  sendJSON(res, 200, { ok: true });
+}
+
+// GET /api/config -> le front sait si la clé est configurée
+function getConfig(res) {
+  sendJSON(res, 200, { hasKey: Boolean(API_KEY) });
+}
+
+// --- Préférences (favoris + modèles récents), stockées dans data/prefs.json ---
+const MAX_RECENTS = 8;
+
+async function readPrefs() {
+  if (!existsSync(PREFS_PATH)) return { favorites: [], recents: [] };
+  try {
+    const data = JSON.parse(await readFile(PREFS_PATH, "utf8"));
+    return {
+      favorites: Array.isArray(data.favorites) ? data.favorites : [],
+      recents: Array.isArray(data.recents) ? data.recents : [],
+    };
+  } catch {
+    return { favorites: [], recents: [] };
+  }
+}
+
+async function writePrefs(prefs) {
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(PREFS_PATH, JSON.stringify(prefs, null, 2), "utf8");
+}
+
+// GET /api/prefs
+async function getPrefs(res) {
+  sendJSON(res, 200, await readPrefs());
+}
+
+// PUT /api/prefs -> remplace les favoris (liste de model ids)
+async function savePrefs(req, res) {
+  const body = await readBody(req);
+  const prefs = await readPrefs();
+  if (Array.isArray(body.favorites)) {
+    prefs.favorites = body.favorites
+      .filter((x) => typeof x === "string")
+      .slice(0, 100);
+  }
+  await writePrefs(prefs);
+  sendJSON(res, 200, prefs);
+}
+
+// POST /api/prefs/recent -> pousse un modèle en tête des récents
+async function pushRecent(req, res) {
+  const body = await readBody(req);
+  const id = typeof body.model === "string" ? body.model : null;
+  if (!id) return sendJSON(res, 400, { error: "model requis" });
+  const prefs = await readPrefs();
+  prefs.recents = [id, ...prefs.recents.filter((m) => m !== id)].slice(
+    0,
+    MAX_RECENTS
+  );
+  await writePrefs(prefs);
+  sendJSON(res, 200, prefs);
+}
+
+// GET /api/models -> liste des modèles OpenRouter (pour le menu déroulant)
+async function getModels(res) {
+  if (!API_KEY) return sendJSON(res, 500, { error: "Clé API manquante" });
+  try {
+    const r = await fetch(MODELS_URL, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    });
+    if (!r.ok) {
+      return sendJSON(res, r.status, { error: "Impossible de charger les modèles" });
+    }
+    const json = await r.json();
+    const models = (json.data || [])
+      .map((m) => {
+        const arch = m.architecture || {};
+        const input = arch.input_modalities || [];
+        const output = arch.output_modalities || [];
+        return {
+          id: m.id,
+          name: m.name || m.id,
+          // Capacités utilisées par le front (multimodal + génération d'image).
+          canImageIn: input.includes("image"),
+          canFileIn: input.includes("file"),
+          canImageOut: output.includes("image"),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    sendJSON(res, 200, { models });
+  } catch (e) {
+    sendJSON(res, 500, { error: String(e.message || e) });
+  }
+}
+
+// POST /api/chat -> proxy streaming vers OpenRouter
+async function chat(req, res) {
+  if (!API_KEY) {
+    return sendJSON(res, 500, {
+      error: "Clé API manquante. Crée un fichier .env avec OPENROUTER_API_KEY.",
+    });
+  }
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (e) {
+    return sendJSON(res, 400, { error: String(e.message || e) });
+  }
+
+  const { model, messages, modalities } = body;
+  if (!model || !Array.isArray(messages) || messages.length === 0) {
+    return sendJSON(res, 400, { error: "model et messages requis" });
+  }
+
+  const controller = new AbortController();
+  // Si le navigateur ferme l'onglet, on coupe la requête vers OpenRouter.
+  req.on("close", () => controller.abort());
+
+  // Payload OpenRouter. `messages` peut contenir du contenu multimodal
+  // (tableau de parts texte/image) : on le relaie tel quel.
+  const payload = { model, messages, stream: true };
+  // Si le front demande une sortie image (génération), on l'active.
+  if (Array.isArray(modalities) && modalities.length) {
+    payload.modalities = modalities;
+  }
+
+  let upstream;
+  try {
+    upstream = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        "content-type": "application/json",
+        "HTTP-Referer": "http://localhost",
+        "X-Title": "client-openrouter local",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (controller.signal.aborted) return;
+    return sendJSON(res, 502, { error: "Connexion à OpenRouter impossible: " + e.message });
+  }
+
+  if (!upstream.ok || !upstream.body) {
+    let errText = "";
+    try {
+      errText = await upstream.text();
+    } catch {}
+    let msg = `OpenRouter a répondu ${upstream.status}`;
+    try {
+      const parsed = JSON.parse(errText);
+      if (parsed?.error?.message) msg = parsed.error.message;
+    } catch {
+      if (errText) msg += `: ${errText.slice(0, 300)}`;
+    }
+    return sendJSON(res, upstream.status || 502, { error: msg });
+  }
+
+  // On relaie tel quel le flux SSE d'OpenRouter au navigateur.
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+
+  const reader = upstream.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(value);
+    }
+  } catch (e) {
+    if (!controller.signal.aborted) {
+      // On signale l'erreur au flux si possible.
+      try {
+        res.write(
+          `data: ${JSON.stringify({ error: String(e.message || e) })}\n\n`
+        );
+      } catch {}
+    }
+  } finally {
+    res.end();
+  }
+}
+
+// --- Fichiers statiques ---
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+};
+
+async function serveStatic(res, urlPath) {
+  const rel = urlPath === "/" ? "/index.html" : urlPath;
+  const filePath = resolve(join(PUBLIC_DIR, "." + rel));
+  // Empêche toute sortie du dossier public.
+  if (!filePath.startsWith(PUBLIC_DIR)) {
+    res.writeHead(403);
+    return res.end("Interdit");
+  }
+  if (!existsSync(filePath)) {
+    res.writeHead(404);
+    return res.end("Introuvable");
+  }
+  try {
+    const data = await readFile(filePath);
+    res.writeHead(200, { "content-type": MIME[extname(filePath)] || "application/octet-stream" });
+    res.end(data);
+  } catch {
+    res.writeHead(500);
+    res.end("Erreur serveur");
+  }
+}
+
+// --- Routeur ---
+const server = createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const path = url.pathname;
+    const method = req.method;
+
+    // API
+    if (path === "/api/config" && method === "GET") return getConfig(res);
+    if (path === "/api/prefs" && method === "GET") return await getPrefs(res);
+    if (path === "/api/prefs" && method === "PUT") return await savePrefs(req, res);
+    if (path === "/api/prefs/recent" && method === "POST")
+      return await pushRecent(req, res);
+    if (path === "/api/models" && method === "GET") return await getModels(res);
+    if (path === "/api/chat" && method === "POST") return await chat(req, res);
+    if (path === "/api/chats" && method === "GET") return await listChats(res);
+
+    const chatMatch = path.match(/^\/api\/chats\/([^/]+)$/);
+    if (chatMatch) {
+      const id = decodeURIComponent(chatMatch[1]);
+      if (method === "GET") return await getChat(res, id);
+      if (method === "PUT") return await saveChat(req, res, id);
+      if (method === "DELETE") return await deleteChat(res, id);
+    }
+
+    if (path.startsWith("/api/")) return sendJSON(res, 404, { error: "route inconnue" });
+
+    // Statique
+    if (method === "GET") return await serveStatic(res, path);
+
+    res.writeHead(405);
+    res.end("Méthode non autorisée");
+  } catch (e) {
+    console.error("Erreur serveur:", e);
+    if (!res.headersSent) sendJSON(res, 500, { error: "Erreur interne" });
+    else res.end();
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`\n  Client OpenRouter prêt 👉  http://localhost:${PORT}`);
+  console.log(`  Discussions sauvées dans : ${CHATS_DIR}`);
+  if (!API_KEY) console.log(`  ⚠️  N'oublie pas de créer ton .env !`);
+  console.log("");
+});

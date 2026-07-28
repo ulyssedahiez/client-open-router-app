@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Client OpenRouter</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
+  <link rel="stylesheet" href="/vendor/highlight-github.min.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Barre latérale : liste des discussions -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <button id="new-chat" class="btn-primary">+ Nouvelle discussion</button>
+      </div>
+      <ul id="chat-list"></ul>
+      <div class="sidebar-footer">
+        <span class="muted">Sauvé dans ./chats/</span>
+      </div>
+    </aside>
+
+    <!-- Zone principale -->
+    <main id="main">
+      <header id="topbar">
+        <button id="toggle-sidebar" class="icon-btn" title="Afficher/masquer">☰</button>
+
+        <!-- Sélecteur de modèle : bouton + panneau arborescent -->
+        <div id="model-picker">
+          <button id="model-btn" title="Choisir un modèle">
+            <span id="model-btn-label">Choisir un modèle…</span>
+            <span class="chev">▾</span>
+          </button>
+          <button id="fav-toggle" title="Ajouter/retirer des favoris">☆</button>
+
+          <div id="model-panel" hidden>
+            <div class="mp-header">
+              <input
+                id="model-filter"
+                type="text"
+                placeholder="Rechercher un modèle…"
+                autocomplete="off"
+              />
+              <button id="img-filter" title="N'afficher que les modèles qui génèrent des images">🎨</button>
+            </div>
+            <div id="model-tree"></div>
+          </div>
+        </div>
+
+        <span id="status" class="muted"></span>
+      </header>
+
+      <section id="messages"></section>
+
+      <footer id="composer">
+        <!-- Aperçu des pièces jointes en attente -->
+        <div id="attachments" hidden></div>
+        <div class="composer-row">
+          <button id="attach-btn" class="icon-btn" title="Joindre une image ou un document">📎</button>
+          <input id="file-input" type="file" multiple hidden
+                 accept="image/*,.pdf,.txt,.md,.markdown,.csv,.json,.js,.ts,.py,.html,.css,.xml,.yaml,.yml,.log" />
+          <textarea
+            id="input"
+            rows="1"
+            placeholder="Écris ton message…  (Entrée = envoyer, Maj+Entrée = nouvelle ligne)"
+          ></textarea>
+          <button id="send" class="btn-primary">Envoyer</button>
+          <button id="stop" class="btn-secondary" hidden>Stop</button>
+        </div>
+        <div id="drop-hint">Dépose tes fichiers ici</div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- Lightbox : agrandissement d'une image -->
+  <div id="lightbox" hidden>
+    <div id="lightbox-toolbar">
+      <a id="lightbox-dl" title="Télécharger">⬇</a>
+      <button id="lightbox-close" title="Fermer (Échap)">✕</button>
+    </div>
+    <img id="lightbox-img" alt="image agrandie" />
+  </div>
+
+  <!-- Libs vendorisées en local (aucun CDN à l'exécution) -->
+  <script src="/vendor/markdown-it.min.js"></script>
+  <script src="/vendor/purify.min.js"></script>
+  <script src="/vendor/highlight.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
