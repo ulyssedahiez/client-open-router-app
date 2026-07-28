@@ -118,6 +118,7 @@ const el = {
   modelBtnLabel: $("#model-btn-label"),
   modelPanel: $("#model-panel"),
   modelTree: $("#model-tree"),
+  modelLegend: $("#model-legend"),
   modelFilter: $("#model-filter"),
   favToggle: $("#fav-toggle"),
   imgFilter: $("#img-filter"),
@@ -189,6 +190,15 @@ const ICONS = {
     '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
   trash:
     '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/>',
+  // Modalités des modèles
+  video:
+    '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="M22 8l-6 4 6 4z"/>',
+  audio:
+    '<path d="M3 10v4M7 6v12M11 3v18M15 8v8M19 5v14M23 10v4"/>',
+  music:
+    '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  mic:
+    '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/>',
 };
 
 // Renvoie une chaîne <svg> pour l'icône donnée.
@@ -707,11 +717,33 @@ function providerOf(m) {
   return slug.charAt(0).toUpperCase() + slug.slice(1);
 }
 
-// Nom d'icône de capacité d'un modèle (image générée / vision), ou null.
-function capIcon(m) {
-  if (m.canImageOut) return "image";
-  if (m.canImageIn) return "eye";
-  return null;
+// Badges de capacité d'un modèle : liste de { icon, cls, title }.
+// Sorties (génération) mises en avant, puis entrées (ce qu'il accepte).
+function capBadges(m) {
+  const badges = [];
+  const inMod = m.inMod || [];
+  const outMod = m.outMod || [];
+  // --- Sorties (ce que le modèle GÉNÈRE) ---
+  if (outMod.includes("image") || m.canImageOut)
+    badges.push({ icon: "image", cls: "cap-gen", title: "Génère des images" });
+  if (outMod.includes("audio"))
+    badges.push({ icon: "music", cls: "cap-gen", title: "Génère de l'audio/musique" });
+  // --- Entrées (ce que le modèle ACCEPTE) ---
+  if (inMod.includes("image") || m.canImageIn)
+    badges.push({ icon: "eye", cls: "cap-in", title: "Comprend les images (vision)" });
+  if (inMod.includes("video"))
+    badges.push({ icon: "video", cls: "cap-in", title: "Accepte la vidéo" });
+  if (inMod.includes("audio"))
+    badges.push({ icon: "mic", cls: "cap-in", title: "Accepte l'audio" });
+  if (inMod.includes("file") || m.canFileIn)
+    badges.push({ icon: "file", cls: "cap-in", title: "Accepte les documents (PDF…)" });
+  return badges;
+}
+
+// Le badge principal (pour le bouton du sélecteur) : la sortie la plus notable.
+function primaryBadge(m) {
+  const b = capBadges(m);
+  return b.length ? b[0] : null;
 }
 
 // Construit une ligne « modèle » cliquable dans l'arborescence.
@@ -720,11 +752,17 @@ function makeModelItem(m) {
   item.className = "mt-item" + (m.id === state.model ? " selected" : "");
   item.dataset.id = m.id;
 
-  const ci = capIcon(m);
-  if (ci) {
-    const b = iconEl(ci, 15);
-    b.classList.add("mt-cap", ci === "image" ? "cap-gen" : "cap-vision");
-    item.appendChild(b);
+  const badges = capBadges(m);
+  if (badges.length) {
+    const wrap = document.createElement("span");
+    wrap.className = "mt-caps";
+    for (const b of badges) {
+      const ic = iconEl(b.icon, 14);
+      ic.classList.add("mt-cap", b.cls);
+      ic.title = b.title;
+      wrap.appendChild(ic);
+    }
+    item.appendChild(wrap);
   }
   const name = document.createElement("span");
   name.className = "mt-name";
@@ -884,10 +922,15 @@ function updateModelButton() {
   const cm = currentModel();
   el.modelBtnLabel.innerHTML = "";
   if (cm) {
-    const ci = capIcon(cm);
-    if (ci) el.modelBtnLabel.appendChild(iconEl(ci, 15));
+    const pb = primaryBadge(cm);
+    if (pb) {
+      const ic = iconEl(pb.icon, 15);
+      ic.classList.add(pb.cls);
+      ic.title = pb.title;
+      el.modelBtnLabel.appendChild(ic);
+    }
     el.modelBtnLabel.appendChild(
-      document.createTextNode((ci ? " " : "") + (cm.name || cm.id))
+      document.createTextNode((pb ? " " : "") + (cm.name || cm.id))
     );
   } else {
     el.modelBtnLabel.textContent = state.model || "Choisir un modèle…";
@@ -1045,9 +1088,32 @@ function toggleFavorite() {
 function openModelPanel() {
   el.modelPanel.hidden = false;
   el.modelBtn.classList.add("open");
+  renderLegend();
   renderTree();
   el.modelFilter.value = "";
   setTimeout(() => el.modelFilter.focus(), 0);
+}
+
+// Légende des badges de capacité, au-dessus de l'arborescence.
+function renderLegend() {
+  const items = [
+    { icon: "image", cls: "cap-gen", label: "Images" },
+    { icon: "music", cls: "cap-gen", label: "Audio" },
+    { icon: "eye", cls: "cap-in", label: "Vision" },
+    { icon: "video", cls: "cap-in", label: "Vidéo" },
+    { icon: "mic", cls: "cap-in", label: "Audio in" },
+    { icon: "file", cls: "cap-in", label: "Docs" },
+  ];
+  el.modelLegend.innerHTML = "";
+  for (const it of items) {
+    const chip = document.createElement("span");
+    chip.className = "legend-chip";
+    const ic = iconEl(it.icon, 13);
+    ic.classList.add(it.cls);
+    chip.appendChild(ic);
+    chip.appendChild(document.createTextNode(it.label));
+    el.modelLegend.appendChild(chip);
+  }
 }
 function closeModelPanel() {
   el.modelPanel.hidden = true;

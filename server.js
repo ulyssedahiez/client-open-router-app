@@ -328,6 +328,9 @@ async function getModels(res) {
           canImageIn: input.includes("image"),
           canFileIn: input.includes("file"),
           canImageOut: output.includes("image"),
+          // Modalités brutes (pour les badges variés : vidéo, audio, etc.).
+          inMod: input,
+          outMod: output,
           // Paramètres réellement supportés par le modèle (avertissements front).
           supported: Array.isArray(m.supported_parameters)
             ? m.supported_parameters

@@ -302,9 +302,11 @@ html, body {
 }
 .mt-item:hover { background: var(--bg-elev-2); }
 .mt-item.selected { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.mt-item .mt-cap { display: inline-flex; flex-shrink: 0; }
-.mt-item .cap-gen { color: var(--accent-2); }
-.mt-item .cap-vision { color: var(--text-muted); }
+.mt-caps { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.mt-cap { display: inline-flex; flex-shrink: 0; }
+/* Sorties (génération) = accent violet, plus visibles. Entrées = discrètes. */
+.cap-gen { color: var(--accent-2); }
+.cap-in { color: var(--text-muted); }
 .mt-item .mt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .mt-item .mt-star {
   border: none;
@@ -1193,3 +1195,20 @@ input:focus, textarea:focus, select:focus {
   width: 100%;
   border-radius: var(--radius-sm);
 }
+
+/* Légende des badges de capacité (en tête du sélecteur) */
+#model-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.legend-chip .ic svg { width: 13px; height: 13px; }
