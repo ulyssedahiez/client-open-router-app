@@ -144,9 +144,11 @@ html, body {
   background: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 15px;
-  padding: 2px 4px;
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 7px;
+  flex-shrink: 0;
 }
 #chat-list li:hover .del { opacity: 1; }
 #chat-list .del:hover { color: var(--danger); background: rgba(220, 47, 69, 0.08); }

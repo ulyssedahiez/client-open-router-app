@@ -101,6 +101,8 @@ const ICONS = {
   send: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
   eye:
     '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  trash:
+    '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/>',
 };
 
 // Renvoie une chaîne <svg> pour l'icône donnée.
@@ -464,7 +466,7 @@ async function loadChatList() {
       title.title = c.title;
       const del = document.createElement("button");
       del.className = "del";
-      del.textContent = "🗑";
+      del.innerHTML = svgIcon("trash", 16);
       del.title = "Supprimer";
       del.addEventListener("click", (e) => {
         e.stopPropagation();
