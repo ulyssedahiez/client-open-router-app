@@ -65,6 +65,76 @@ const el = {
   usageBody: $("#usage-body"),
 };
 
+// ---------- Icônes (SVG ligne, style épuré) ----------
+// Chaque icône est un <svg> 24x24, stroke=currentColor : hérite de la couleur du bouton.
+const ICONS = {
+  menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
+  star: '<path d="M12 3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 18.8 6.2 21.9l1.1-6.5L2.6 9.8l6.5-.9z"/>',
+  starFill:
+    '<path d="M12 3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 18.8 6.2 21.9l1.1-6.5L2.6 9.8l6.5-.9z" fill="currentColor" stroke="none"/>',
+  image:
+    '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/>',
+  chart:
+    '<path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6" rx="1"/><rect x="12" y="7" width="3" height="10" rx="1"/><rect x="17" y="13" width="3" height="4" rx="1"/>',
+  settings:
+    '<circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  paperclip:
+    '<path d="M21.4 11.1l-9.2 9.2a5 5 0 0 1-7.1-7.1l9.2-9.2a3.3 3.3 0 0 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.5-8.5"/>',
+  download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+  close: '<path d="M18 6L6 18M6 6l12 12"/>',
+  copy:
+    '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+  refresh:
+    '<path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v5h-5"/>',
+  edit:
+    '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  file:
+    '<path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>',
+  chevron: '<path d="M6 9l6 6 6-6"/>',
+  send: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
+  eye:
+    '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+};
+
+// Renvoie une chaîne <svg> pour l'icône donnée.
+function svgIcon(name, size = 18) {
+  return (
+    `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" ` +
+    `stroke="currentColor" stroke-width="1.8" stroke-linecap="round" ` +
+    `stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`
+  );
+}
+// Petit élément span contenant l'icône (pour concaténer avec du texte).
+function iconEl(name, size = 15) {
+  const s = document.createElement("span");
+  s.className = "ic";
+  s.innerHTML = svgIcon(name, size);
+  return s;
+}
+
+// Remplit les boutons statiques (topbar, composer, modales) avec leurs icônes.
+function installIcons() {
+  const map = {
+    "#toggle-sidebar": "menu",
+    "#usage-btn": "chart",
+    "#settings-btn": "settings",
+    "#settings-btn-bottom": "settings",
+    "#attach-btn": "paperclip",
+    "#img-filter": "image",
+    "#settings-close": "close",
+    "#usage-close": "close",
+    "#lightbox-close": "close",
+  };
+  for (const [sel, name] of Object.entries(map)) {
+    const node = document.querySelector(sel);
+    if (node) node.innerHTML = svgIcon(name, sel.includes("close") ? 18 : 19);
+  }
+  const dl = document.querySelector("#lightbox-dl");
+  if (dl) dl.innerHTML = svgIcon("download", 20);
+  const chev = document.querySelector("#model-btn .chev");
+  if (chev) chev.innerHTML = svgIcon("chevron", 15);
+}
+
 // ---------- Lightbox ----------
 function openLightbox(src) {
   el.lightboxImg.src = src;
@@ -251,7 +321,8 @@ function makeGenImage(src) {
 
   const dl = document.createElement("a");
   dl.className = "gen-image-dl";
-  dl.textContent = "⬇ Télécharger";
+  dl.appendChild(iconEl("download", 14));
+  dl.appendChild(document.createTextNode(" Télécharger"));
   dl.href = src;
   // Déduit une extension à partir du data URL (png par défaut).
   const m = /^data:image\/(\w+)/.exec(src);
@@ -290,7 +361,8 @@ function makeMessageEl(role, content, msg = {}) {
       } else {
         const pill = document.createElement("span");
         pill.className = "file-pill";
-        pill.textContent = "📄 " + (a.name || "document");
+        pill.appendChild(iconEl("file", 14));
+        pill.appendChild(document.createTextNode(" " + (a.name || "document")));
         av.appendChild(pill);
       }
     }
@@ -316,37 +388,38 @@ function makeMessageEl(role, content, msg = {}) {
 
   wrap.appendChild(bubble);
 
+  // Petit bouton d'action (icône + label) sous une bulle.
+  function actBtn(iconName, label, handler) {
+    const b = document.createElement("button");
+    b.className = "msg-act";
+    b.appendChild(iconEl(iconName, 14));
+    b.appendChild(document.createTextNode(" " + label));
+    b.addEventListener("click", handler);
+    return b;
+  }
+
   // Barre d'actions (copier / régénérer / éditer) sous la bulle.
   if (role === "assistant" || role === "user") {
     const actions = document.createElement("div");
     actions.className = "msg-actions";
 
     if (content) {
-      const copyBtn = document.createElement("button");
-      copyBtn.className = "msg-act";
-      copyBtn.textContent = "⧉ Copier";
-      copyBtn.addEventListener("click", () => {
+      const copyBtn = actBtn("copy", "Copier", () => {
         navigator.clipboard.writeText(content).then(() => {
-          copyBtn.textContent = "✓ Copié";
-          setTimeout(() => (copyBtn.textContent = "⧉ Copier"), 1200);
+          copyBtn.lastChild.textContent = " Copié";
+          setTimeout(() => (copyBtn.lastChild.textContent = " Copier"), 1200);
         });
       });
       actions.appendChild(copyBtn);
     }
 
     if (role === "assistant") {
-      // Régénérer : seulement pour la dernière réponse assistant.
       const lastAssistant = [...state.messages]
         .reverse()
         .find((m) => m.role === "assistant");
       if (msg === lastAssistant) {
-        const reg = document.createElement("button");
-        reg.className = "msg-act";
-        reg.textContent = "↻ Régénérer";
-        reg.addEventListener("click", regenerateLast);
-        actions.appendChild(reg);
+        actions.appendChild(actBtn("refresh", "Régénérer", regenerateLast));
       }
-      // Coût / tokens de cette réponse, si connu.
       if (msg.usage) {
         const cost = document.createElement("span");
         cost.className = "msg-cost";
@@ -359,11 +432,7 @@ function makeMessageEl(role, content, msg = {}) {
     if (role === "user") {
       const idx = state.messages.indexOf(msg);
       if (idx !== -1) {
-        const ed = document.createElement("button");
-        ed.className = "msg-act";
-        ed.textContent = "✎ Éditer";
-        ed.addEventListener("click", () => editUserMessage(idx));
-        actions.appendChild(ed);
+        actions.appendChild(actBtn("edit", "Éditer", () => editUserMessage(idx)));
       }
     }
 
@@ -530,11 +599,11 @@ function providerOf(m) {
   return slug.charAt(0).toUpperCase() + slug.slice(1);
 }
 
-// Badge de capacité affiché devant un modèle.
-function capBadge(m) {
-  if (m.canImageOut) return "🎨";
-  if (m.canImageIn) return "👁";
-  return "";
+// Nom d'icône de capacité d'un modèle (image générée / vision), ou null.
+function capIcon(m) {
+  if (m.canImageOut) return "image";
+  if (m.canImageIn) return "eye";
+  return null;
 }
 
 // Construit une ligne « modèle » cliquable dans l'arborescence.
@@ -543,10 +612,10 @@ function makeModelItem(m) {
   item.className = "mt-item" + (m.id === state.model ? " selected" : "");
   item.dataset.id = m.id;
 
-  const badge = capBadge(m);
-  if (badge) {
-    const b = document.createElement("span");
-    b.textContent = badge;
+  const ci = capIcon(m);
+  if (ci) {
+    const b = iconEl(ci, 15);
+    b.classList.add("mt-cap", ci === "image" ? "cap-gen" : "cap-vision");
     item.appendChild(b);
   }
   const name = document.createElement("span");
@@ -558,7 +627,7 @@ function makeModelItem(m) {
   const star = document.createElement("button");
   const isFav = state.favorites.includes(m.id);
   star.className = "mt-star" + (isFav ? " on" : "");
-  star.textContent = isFav ? "★" : "☆";
+  star.innerHTML = svgIcon(isFav ? "starFill" : "star", 15);
   star.title = isFav ? "Retirer des favoris" : "Ajouter aux favoris";
   star.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -575,7 +644,7 @@ function makeModelItem(m) {
 function makeTreeGroup(
   label,
   models,
-  { collapsible = true, key = label, collapsed = false } = {}
+  { collapsible = true, key = label, collapsed = false, icon = null } = {}
 ) {
   if (models.length === 0) return null;
   const group = document.createElement("div");
@@ -585,11 +654,16 @@ function makeTreeGroup(
   const head = document.createElement("button");
   head.className = "mt-group-head";
   if (collapsible) {
-    // Chevron toujours "▾" : la rotation (fermé → droite) est gérée en CSS.
+    // Chevron SVG ; la rotation (fermé → droite) est gérée en CSS.
     const tw = document.createElement("span");
     tw.className = "tw";
-    tw.textContent = "▾";
+    tw.innerHTML = svgIcon("chevron", 16);
     head.appendChild(tw);
+  }
+  if (icon) {
+    const gi = iconEl(icon, 15);
+    gi.classList.add("mt-group-ic");
+    head.appendChild(gi);
   }
   const lbl = document.createElement("span");
   lbl.textContent = label;
@@ -650,14 +724,16 @@ function renderTree() {
   const searching = Boolean(filter);
 
   // Favoris & Récents : toujours ouverts en haut.
-  const favG = makeTreeGroup("★ Favoris", favModels, {
+  const favG = makeTreeGroup("Favoris", favModels, {
     key: "__fav",
     collapsed: false,
+    icon: "starFill",
   });
   if (favG) el.modelTree.appendChild(favG);
-  const recG = makeTreeGroup("↻ Récents", recentModels, {
+  const recG = makeTreeGroup("Récents", recentModels, {
     key: "__rec",
     collapsed: false,
+    icon: "refresh",
   });
   if (recG) el.modelTree.appendChild(recG);
 
@@ -698,9 +774,16 @@ function populateModels() {
 
 function updateModelButton() {
   const cm = currentModel();
-  el.modelBtnLabel.textContent = cm
-    ? (capBadge(cm) ? capBadge(cm) + " " : "") + (cm.name || cm.id)
-    : state.model || "Choisir un modèle…";
+  el.modelBtnLabel.innerHTML = "";
+  if (cm) {
+    const ci = capIcon(cm);
+    if (ci) el.modelBtnLabel.appendChild(iconEl(ci, 15));
+    el.modelBtnLabel.appendChild(
+      document.createTextNode((ci ? " " : "") + (cm.name || cm.id))
+    );
+  } else {
+    el.modelBtnLabel.textContent = state.model || "Choisir un modèle…";
+  }
 }
 
 // Sélectionne un modèle, ferme le panneau.
@@ -759,7 +842,7 @@ async function saveDefaults() {
 
 function updateFavToggle() {
   const isFav = state.model && state.favorites.includes(state.model);
-  el.favToggle.textContent = isFav ? "★" : "☆";
+  el.favToggle.innerHTML = svgIcon(isFav ? "starFill" : "star", 18);
   el.favToggle.classList.toggle("is-fav", Boolean(isFav));
   el.favToggle.title = isFav ? "Retirer des favoris" : "Ajouter aux favoris";
   updateComposerCaps();
@@ -1185,9 +1268,7 @@ function renderAttachments() {
       img.src = a.dataUrl;
       chip.appendChild(img);
     } else {
-      const icon = document.createElement("span");
-      icon.textContent = a.type === "file" ? "📄" : "📝";
-      chip.appendChild(icon);
+      chip.appendChild(iconEl("file", 15));
     }
     const name = document.createElement("span");
     name.className = "name";
@@ -1442,6 +1523,7 @@ function showNoKeyBanner() {
 
 // ---------- Démarrage ----------
 (async function init() {
+  installIcons();
   renderMessages();
   syncSettingsUI();
   let hasKey = true;
