@@ -63,6 +63,10 @@ const el = {
   maxTok: $("#maxtok"),
   setDefaultBtn: $("#set-default-btn"),
   setDefaultOk: $("#set-default-ok"),
+  defWebSearch: $("#def-web-search"),
+  defTempRange: $("#def-temp-range"),
+  defTempVal: $("#def-temp-val"),
+  defMaxTok: $("#def-maxtok"),
   usageBtn: $("#usage-btn"),
   usageModal: $("#usage-modal"),
   usageClose: $("#usage-close"),
@@ -1359,11 +1363,17 @@ document.addEventListener("keydown", (e) => {
 // ---------- Modales réglages (générale + rapide) ----------
 // Synchronise les champs des deux modales avec l'état courant.
 function syncSettingsUI() {
+  // Réglages de la discussion courante (modale rapide).
   el.systemPrompt.value = state.systemPrompt || "";
   el.tempRange.value = state.settings.temperature;
   el.tempVal.textContent = Number(state.settings.temperature).toFixed(1);
   el.maxTok.value = state.settings.maxTokens || 0;
   el.webSearch.checked = Boolean(state.settings.webSearch);
+  // Réglages par défaut (modale générale).
+  el.defWebSearch.checked = Boolean(state.defaults.webSearch);
+  el.defTempRange.value = state.defaults.temperature;
+  el.defTempVal.textContent = Number(state.defaults.temperature).toFixed(1);
+  el.defMaxTok.value = state.defaults.maxTokens || 0;
 }
 
 // ⚙ HAUT : instructions système + réglages par défaut.
@@ -1420,7 +1430,29 @@ el.webSearch.addEventListener("change", () => {
   if (state.chatId) persist();
 });
 
-// « Enregistrer comme défaut » : copie les réglages courants dans les défauts.
+// --- Champs des RÉGLAGES PAR DÉFAUT (édités directement, sauvés côté serveur) ---
+function flashDefaultOk() {
+  el.setDefaultOk.hidden = false;
+  clearTimeout(flashDefaultOk._t);
+  flashDefaultOk._t = setTimeout(() => (el.setDefaultOk.hidden = true), 1600);
+}
+el.defWebSearch.addEventListener("change", () => {
+  state.defaults.webSearch = el.defWebSearch.checked;
+  saveDefaults();
+  flashDefaultOk();
+});
+el.defTempRange.addEventListener("input", () => {
+  state.defaults.temperature = Number(el.defTempRange.value);
+  el.defTempVal.textContent = state.defaults.temperature.toFixed(1);
+  saveDefaults();
+});
+el.defMaxTok.addEventListener("input", () => {
+  state.defaults.maxTokens = Math.max(0, Number(el.defMaxTok.value) || 0);
+  saveDefaults();
+});
+
+// « Copier les réglages de cette discussion comme défaut » : reprend température,
+// longueur, recherche web et prompt système de la discussion courante.
 el.setDefaultBtn.addEventListener("click", async () => {
   state.defaults = {
     temperature: state.settings.temperature,
@@ -1428,9 +1460,9 @@ el.setDefaultBtn.addEventListener("click", async () => {
     systemPrompt: state.systemPrompt || "",
     webSearch: Boolean(state.settings.webSearch),
   };
+  syncSettingsUI(); // met à jour les champs des défauts affichés
   await saveDefaults();
-  el.setDefaultOk.hidden = false;
-  setTimeout(() => (el.setDefaultOk.hidden = true), 2000);
+  flashDefaultOk();
 });
 
 // ---------- Modale bilan de consommation ----------
